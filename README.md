@@ -21,7 +21,7 @@ For more details, check *Sulc A., Event2Vec: A Geometric Approach to Learning Co
 
 To install the event2vec package, simply clone this repository and run the following command from the root directory:
 ```
-pip install event2vec 
+pip install git+https://github.com/sulcantonin/event2vec_public 
 ```
 
 This will make the event2vec module available in your Python environment.
