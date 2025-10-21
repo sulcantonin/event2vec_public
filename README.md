@@ -1,5 +1,6 @@
 # Event2Vec: A Geometric Approach to Learning Composable Representations of Event Sequences
-Author: Antonin Sulc
+Author: [Antonin Sulc](http://sulcantonin.github.io).
+Paper: [![arXiv](https://img.shields.io/badge/arXiv-2509.12188-b31b1b.svg)](https://arxiv.org/abs/2509.12188)
 
 ## Overview
 
@@ -25,6 +26,8 @@ This will make the event2vec module available in your Python environment.
 ## Quickstart (tiny synthetic dataset)
 
 The snippet below trains a small `EuclideanModel` on a toy event graph for a few epochs and prints an embedding for a short sequence. It runs in seconds on CPU.
+
+We have 5 events: `START, A, B, C, END` and we test if we add `START + A + C ~ C`. The example should be self contained for educational purposes, as the main interest is the loss function. 
 
 ```python
 import random
@@ -199,7 +202,7 @@ plt.show()
 ```
 
 ## References
-
+For citations please use following Bibtex. 
 ```bibtex
 @article{sulc2025event2vec,
   title={Event2Vec: A Geometric Approach to Learning Composable Representations of Event Sequences},
