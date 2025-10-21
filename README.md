@@ -2,6 +2,9 @@
 Author: [Antonin Sulc](http://sulcantonin.github.io).
 Paper: [![arXiv](https://img.shields.io/badge/arXiv-2509.12188-b31b1b.svg)](https://arxiv.org/abs/2509.12188)
 
+![Teaser](./images/teaser.png)
+
+
 ## Overview
 
 Event2Vec is a framework for learning representations of discrete event sequences. Inspired by the geometric structures found in neural representations, this model uses a simple, additive recurrent structure to create composable and interpretable embeddings.
