@@ -20,11 +20,20 @@ For more details, check *Sulc A., Event2Vec: A Geometric Approach to Learning Co
 ## Installation
 
 To install the event2vec package, simply clone this repository and run the following command from the root directory:
-```
+```bash
 pip install git+https://github.com/sulcantonin/event2vec_public 
 ```
 
 This will make the event2vec module available in your Python environment.
+
+## Brown Example
+Afeer installation, you can try to run Brown Part-of-Speech tagging example from the paper. 
+
+```bash
+python3 -m experiments.prepare_brown_data.py
+python3 -m experiments.train_brown_data.py
+python3 -m experiments.visualize_brown_corpus.py
+```
 
 ## Quickstart (tiny synthetic dataset)
 
