@@ -1,6 +1,6 @@
 # Event2Vec: A Geometric Approach to Learning Composable Representations of Event Sequences
-Author: [Antonin Sulc](http://sulcantonin.github.io).
-Paper: [![arXiv](https://img.shields.io/badge/arXiv-2509.12188-b31b1b.svg)](https://arxiv.org/abs/2509.12188)
+- Author: [Antonin Sulc](http://sulcantonin.github.io).
+- Paper: [![arXiv](https://img.shields.io/badge/arXiv-2509.12188-b31b1b.svg)](https://arxiv.org/abs/2509.12188)
 
 ![Teaser](./images/teaser.png)
 
