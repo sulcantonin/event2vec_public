@@ -1,6 +1,6 @@
 <div align="center">
 
-# Event2Vector
+# Event2Vector (event2vec)
 ## A Geometric Approach to Learning Composable Representations of Event Sequences
 
 [![PyPI version](https://badge.fury.io/py/event2vector.svg)](https://badge.fury.io/py/event2vector)
@@ -232,7 +232,7 @@ plt.show()
 For citations please use following Bibtex. 
 ```bibtex
 @article{sulc2025event2vec,
-  title={Event2Vector: A Geometric Approach to Learning Composable Representations of Event Sequences},
+  title={Event2Vec: A Geometric Approach to Learning Composable Representations of Event Sequences},
   author={Sulc, Antonin},
   journal={arXiv preprint arXiv:2509.12188},
   year={2025}
