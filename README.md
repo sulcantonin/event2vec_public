@@ -1,30 +1,45 @@
-# Event2Vec: A Geometric Approach to Learning Composable Representations of Event Sequences
-- Author: [Antonin Sulc](http://sulcantonin.github.io).
-- Paper: [![arXiv](https://img.shields.io/badge/arXiv-2509.12188-b31b1b.svg)](https://arxiv.org/abs/2509.12188)
+<div align="center">
+
+# Event2Vec
+## A Geometric Approach to Learning Composable Representations of Event Sequences
+
+[![PyPI version](https://badge.fury.io/py/event2vec.svg)](https://badge.fury.io/py/event2vec)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.6+](https://img.shields.io/badge/python-3.6+-blue.svg)](https://www.python.org/downloads/)
+[![arXiv](https://img.shields.io/badge/arXiv-2509.12188-b31b1b.svg)](https://arxiv.org/abs/2509.12188)
 
 ![Teaser](./images/teaser.png)
 
+</div>
 
 ## Overview
 
-Event2Vec is a framework for learning representations of discrete event sequences. Inspired by the geometric structures found in neural representations, this model uses a simple, additive recurrent structure to create composable and interpretable embeddings.
+**Event2Vec** is a framework for learning representations of discrete event sequences. Inspired by the geometric structures found in neural representations, this model uses a simple, additive recurrent structure to create composable and interpretable embeddings.
 
-# Key Concepts
-* Linear Additive Hypothesis: The core idea behind Event2Vec is that the representation of an event sequence can be modeled as the vector sum of the embeddings of its individual events. This allows for intuitive vector arithmetic, enabling the composition and decomposition of event trajectories.
-* Euclidean and Hyperbolic Models: Event2Vec is offered in two geometric variants:
-* The Euclidean model uses standard vector addition, providing a straightforward, flat geometry for event trajectories.
-* The Hyperbolic model employs Möbius addition, which is better suited for hierarchical data structures, as it can embed tree-like patterns with less distortion.
+## Key Concepts
+* **Linear Additive Hypothesis**: The core idea behind Event2Vec is that the representation of an event sequence can be modeled as the vector sum of the embeddings of its individual events. This allows for intuitive vector arithmetic, enabling the composition and decomposition of event trajectories.
+* **Euclidean and Hyperbolic Models**: Event2Vec is offered in two geometric variants:
+    * **Euclidean model**: Uses standard vector addition, providing a straightforward, flat geometry for event trajectories.
+    * **Hyperbolic model**: Employs Möbius addition, which is better suited for hierarchical data structures, as it can embed tree-like patterns with less distortion.
 
 For more details, check *Sulc A., Event2Vec: A Geometric Approach to Learning Composable Representations of Event Sequences*
 
 ## Installation
 
-To install the event2vec package, simply clone this repository and run the following command from the root directory:
+Install the package directly from PyPI:
+
 ```bash
-pip install git+https://github.com/sulcantonin/event2vec_public 
+pip install event2vec
 ```
 
-This will make the event2vec module available in your Python environment.
+Or install from source:
+
+```bash
+git clone https://github.com/sulcantonin/event2vec_public.git
+cd event2vec_public
+pip install .
+```
+
 
 ## Brown Example
 Afeer installation, you can try to run Brown Part-of-Speech tagging example from the paper. 

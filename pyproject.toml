@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "event2vec"
+version = "0.1.0"
+description = "A geometric approach to learning composable representations of event sequences."
+readme = "README.md"
+authors = [
+  { name = "Antonin Sulc" },
+]
+license = { text = "MIT" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.6"
+dependencies = [
+    "torch",
+    "numpy",
+    "tqdm",
+    "matplotlib",
+    "scikit-learn",
+    "openTSNE",
+    "gensim",
+    "seaborn",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/sulcantonin/event2vec_public"

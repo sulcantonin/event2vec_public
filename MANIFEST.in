@@ -1,0 +1,4 @@
+include README.md
+exclude *.pkl
+exclude *.model
+exclude data/*
