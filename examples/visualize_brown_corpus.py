@@ -11,7 +11,7 @@ from gensim.models import Word2Vec
 from sklearn.metrics import silhouette_score, davies_bouldin_score
 from tqdm import tqdm
 
-from event2vec import EuclideanModel
+from event2vector import EuclideanModel
 
 # --- Configuration ---
 EVENT2VEC_MODEL_FILE = 'event2vec_brown_corpus.model'

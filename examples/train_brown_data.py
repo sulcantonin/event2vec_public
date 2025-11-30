@@ -5,7 +5,7 @@ import random
 from tqdm import tqdm
 import pickle
 import os
-from event2vec import EuclideanModel
+from event2vector import EuclideanModel
 
 # --- Hyperparameters ---
 num_epochs = 128

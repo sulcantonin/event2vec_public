@@ -3,7 +3,8 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "event2vec"
+name = "event2vector"
+
 version = "0.1.0"
 description = "A geometric approach to learning composable representations of event sequences."
 readme = "README.md"

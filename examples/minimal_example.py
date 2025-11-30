@@ -26,8 +26,8 @@ torch.backends.cudnn.benchmark = False
 # Visualization (below): a 2D PCA of token embeddings plus the sequence embedding should show
 # 'SEQ(START-A-C)' lying near the point labeled 'C'.
 
-from event2vec import EuclideanModel
-from event2vec.data import get_sequences
+from event2vector import EuclideanModel
+from event2vector.data import get_sequences
 
 # 1) Define a tiny state-transition toy dataset
 #    We model a simple Markovian process: START → (A or B) → C → END
