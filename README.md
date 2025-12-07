@@ -85,7 +85,7 @@ torch.backends.cudnn.benchmark = False
 # Visualization (below): a 2D PCA of token embeddings plus the sequence embedding should show
 # 'SEQ(START-A-C)' lying near the point labeled 'C'.
 
-from event2vector import EuclideanModel
+from event2vector import Event2Vec
 from event2vector.data import get_sequences
 
 # 1) Define a tiny state-transition toy dataset
@@ -113,104 +113,49 @@ _, processed_sequences, event_2_idx, _ = get_sequences(
     prefix='tiny_quickstart'
 )
 
-# 3) Initialize model and optimizer
-#    EuclideanModel composes sequence representations via additive updates.
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-embedding_dim = 8
-model = EuclideanModel(num_event_types=len(event_types), embedding_dim=embedding_dim, dropout_p=0.1).to(device)
-loss_fn = torch.nn.CrossEntropyLoss()              # prediction loss (next-token)
-optimizer = torch.optim.AdamW(model.parameters(), lr=5e-3)
-lambda_reconstruction = 0.2                        # weight for reconstruction loss (h1 - e ≈ h_old)
-lambda_consistency = 0.2                           # weight for consistency loss (h1 ≈ h2)
-mse_loss = torch.nn.MSELoss()
+estimator = Event2Vec(
+    num_event_types=len(event_types),
+    embedding_dim=8,
+    dropout_p=0.1,
+    learning_rate=5e-3,
+    lambda_reconstruction=0.2,
+    lambda_consistency=0.2,
+    batch_size=32,
+    num_epochs=128,
+    pad_sequences=True,   # enables padded batch processing for speed
+)
+estimator.fit(processed_sequences, verbose=True)
+torch_model = estimator.model
 
-# 4) Minimal training loop
-#    Objective: next-token prediction with cross-entropy.
-#    We iterate tokens in each sequence and accumulate loss over (t → t+1) pairs.
-model.train()
-for epoch in range(128):
-    random.shuffle(processed_sequences)  # shuffling is deterministic given the fixed Python seed
-    total_loss = 0.0
-    for seq_tensor in processed_sequences:
-        if len(seq_tensor) < 2:
-            continue
-        # h is the running sequence representation; encoder adds current token embedding
-        h = torch.zeros((1, embedding_dim), device=device)
-        seq_tensor = seq_tensor.to(device)
-
-        sequence_loss = 0.0
-        for t in range(len(seq_tensor) - 1):
-            x = seq_tensor[t].unsqueeze(0)
-            target = seq_tensor[t + 1].unsqueeze(0)
-            # Brown pipeline: two forward passes from the same h_old to compute a consistency loss
-            h_old = h.detach()
-            y1, h1, e_curr1 = model(x, h_old)
-            y2, h2, e_curr2 = model(x, h_old)
-
-            # Prediction: next-token cross-entropy on the first pass
-            prediction_loss = loss_fn(y1.view(1, -1), target)
-
-            # Reconstruction: undo the additive step (h1 - e ≈ h_old)
-            h_reconstructed = h1 - e_curr1
-            reconstruction_loss = mse_loss(h_reconstructed, h_old)
-
-            # Consistency: two identical passes should produce similar states
-            consistency_loss = mse_loss(h1, h2)
-
-            combined = (prediction_loss +
-                        lambda_reconstruction * reconstruction_loss +
-                        lambda_consistency * consistency_loss)
-            sequence_loss = sequence_loss + combined
-
-            # Advance hidden state using the first pass
-            h = h1.detach()
-
-        if (len(seq_tensor) - 1) > 0:
-            avg_seq_loss = sequence_loss / (len(seq_tensor) - 1)
-            optimizer.zero_grad()
-            avg_seq_loss.backward()
-            optimizer.step()
-            total_loss += avg_seq_loss.item()
-
-    print(f"epoch {epoch + 1}: loss={total_loss / max(1, len(processed_sequences)):.4f}")
-
-# 5) Use the learned representation for a short sequence
-#    We encode [START, A, C] step-by-step; the final h is the sequence embedding.
-model.eval()
-with torch.no_grad():
-    seq = torch.tensor([
-        event_2_idx['START'], event_2_idx['A'], event_2_idx['C']
-    ], device=device)
-    h = torch.zeros((1, embedding_dim), device=device)
-    for idx in seq:
-        _, h, _ = model(idx.unsqueeze(0), h)
-    print('Sequence embedding (START-A-C):', h.cpu().numpy())
-
+# 4) Use the learned representation for a short sequence via transform()
+seq = torch.tensor([
+    event_2_idx['START'], event_2_idx['A'], event_2_idx['C']
+], dtype=torch.long)
+sequence_embedding = estimator.transform([seq], as_numpy=False)[0]
+print('Sequence embedding (START-A-C):', sequence_embedding.numpy())
 
 with torch.no_grad():
-    # 6) Qualitative check: nearest tokens to the sequence embedding by cosine similarity
-    #    Expect 'C' to be nearest (last consumed token) and 'END' reasonably aligned.
-    emb = model.embedding.weight.detach()                  # [V, 8]
-    h_norm = torch.nn.functional.normalize(h, dim=1)
+    torch_model.eval()
+    # 5) Qualitative check: nearest tokens to the sequence embedding by cosine similarity
+    emb = torch_model.embedding.weight.detach()            # [V, 8]
+    h_norm = torch.nn.functional.normalize(sequence_embedding.unsqueeze(0), dim=1)
     emb_norm = torch.nn.functional.normalize(emb, dim=1)
     sims = (emb_norm @ h_norm.squeeze(0))
     top_sim = torch.topk(sims, k=3)
     print('Nearest tokens by cosine:', [ (list(event_2_idx.keys())[i], float(sims[i])) for i in top_sim.indices ])
 
 with torch.no_grad():
-    # 7) Next-event distribution from the current state
-    #    Expect 'END' to be top-1 with high probability because C→END with p=1.0
-    logits = model.decoder(h)                              # [1, V]
+    # 6) Next-event distribution from the current state
+    logits = torch_model.decoder(sequence_embedding.unsqueeze(0))    # [1, V]
     probs = torch.softmax(logits, dim=-1).squeeze(0)
     top = torch.topk(probs, k=3)
     inv = {v:k for k,v in event_2_idx.items()}
     print('Top-3 next events:', [ (inv[i.item()], float(probs[i])) for i in top.indices ])
 
-# 8) Visualization: PCA of token embeddings + sequence embedding
-#    Expect the red star (sequence) to lie near the point labeled 'C'.
+# 7) Visualization: PCA of token embeddings + sequence embedding
 with torch.no_grad():
-    token_emb = model.embedding.weight.detach().cpu().numpy()   # [V, 8]
-    seq_emb = h.detach().cpu().numpy()                           # [1, 8]
+    token_emb = torch_model.embedding.weight.detach().cpu().numpy()   # [V, 8]
+    seq_emb = sequence_embedding.detach().cpu().numpy()               # [1, 8]
     X = np.vstack([token_emb, seq_emb])
     pca = PCA(n_components=2, random_state=SEED)
     X2 = pca.fit_transform(X)
