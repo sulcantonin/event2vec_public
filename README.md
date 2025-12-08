@@ -37,7 +37,9 @@ pip install event2vector
 Or install from source:
 
 ```bash
-pip install event2vector
+git clone https://github.com/sulcantonin/event2vec_public.git
+cd event2vec_public
+pip install .
 ```
 
 
