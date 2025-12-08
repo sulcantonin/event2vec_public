@@ -21,6 +21,8 @@
 * **Euclidean and Hyperbolic Models**: Event2Vector is offered in two geometric variants:
     * **Euclidean model**: Uses standard vector addition, providing a straightforward, flat geometry for event trajectories.
     * **Hyperbolic model**: Employs Möbius addition, which is better suited for hierarchical data structures, as it can embed tree-like patterns with less distortion.
+* **Estimator API**: A scikit-learn style `Event2Vec` estimator exposes `fit`, `fit_transform`, and `transform`, enabling drop-in use inside pipelines while keeping the compositional recurrent loss from the paper.
+* **Padded batching**: Optional padding allows entire minibatches of variable-length sequences to be processed in parallel, significantly accelerating training on large corpora without changing model behavior.
 
 For more details, check *Sulc A., Event2Vector: A Geometric Approach to Learning Composable Representations of Event Sequences*
 
@@ -35,9 +37,7 @@ pip install event2vector
 Or install from source:
 
 ```bash
-git clone https://github.com/sulcantonin/event2vec_public.git
-cd event2vec_public
-pip install .
+pip install event2vector
 ```
 
 
@@ -52,9 +52,9 @@ python3 -m experiments.visualize_brown_corpus.py
 
 ## Quickstart (tiny synthetic dataset)
 
-The snippet below trains a small `EuclideanModel` on a toy event graph for a few epochs and prints an embedding for a short sequence. It runs in seconds on CPU.
+The snippet below trains the high-level `Event2Vec` estimator on a toy event graph for a few epochs and prints an embedding for a short sequence. It runs in seconds on CPU and mirrors the Euclidean model from the paper while exposing the new fit/transform interface.
 
-We have 5 events: `START, A, B, C, END` and we test if we add `START + A + C ~ C`. The example should be self contained for educational purposes, as the main interest is the loss function. 
+We have 5 events: `START, A, B, C, END` and we test if we add `START + A + C ~ C`. The example remains self-contained so you can inspect the additive loss function in isolation.
 
 ```python
 import random
@@ -172,6 +172,32 @@ plt.legend(loc='best')
 plt.tight_layout()
 plt.show()
 ```
+
+## Estimator API
+
+The `Event2Vec` class mirrors scikit-learn transformers so it can slot into existing NLP pipelines:
+
+```python
+from event2vector import Event2Vec
+
+model = Event2Vec(
+    num_event_types=len(vocab),
+    geometry="euclidean",          # or "hyperbolic"
+    embedding_dim=128,
+    pad_sequences=True,            # mini-batch speed-up
+    num_epochs=50,
+)
+model.fit(train_sequences, verbose=True)
+train_embeddings = model.transform(train_sequences)         # numpy array
+test_embeddings = model.transform(test_sequences, as_numpy=False)  # PyTorch tensor
+```
+
+Key methods:
+- `fit`: optimizes embeddings with the additive loss from the paper.
+- `fit_transform`: convenience helper returning the encoded sequences after fitting.
+- `transform`: freezes weights and encodes arbitrary sequences, optionally returning PyTorch tensors for downstream models.
+- `pad_sequences=True`: enables fully vectorized batches with masking for substantial throughput gains on large corpora.
+
 
 ## References
 For citations please use following Bibtex. 
