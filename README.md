@@ -114,6 +114,7 @@ _, processed_sequences, event_2_idx, _ = get_sequences(
     generate_new=True,
     prefix='tiny_quickstart'
 )
+inv = {v:k for k,v in event_2_idx.items()}
 
 estimator = Event2Vec(
     num_event_types=len(event_types),
@@ -125,6 +126,7 @@ estimator = Event2Vec(
     batch_size=32,
     num_epochs=128,
     pad_sequences=True,   # enables padded batch processing for speed
+    use_gpu=True,         # set to False to force CPU even when CUDA/MPS is present
 )
 estimator.fit(processed_sequences, verbose=True)
 torch_model = estimator.model
@@ -136,22 +138,16 @@ seq = torch.tensor([
 sequence_embedding = estimator.transform([seq], as_numpy=False)[0]
 print('Sequence embedding (START-A-C):', sequence_embedding.numpy())
 
-with torch.no_grad():
-    torch_model.eval()
-    # 5) Qualitative check: nearest tokens to the sequence embedding by cosine similarity
-    emb = torch_model.embedding.weight.detach()            # [V, 8]
-    h_norm = torch.nn.functional.normalize(sequence_embedding.unsqueeze(0), dim=1)
-    emb_norm = torch.nn.functional.normalize(emb, dim=1)
-    sims = (emb_norm @ h_norm.squeeze(0))
-    top_sim = torch.topk(sims, k=3)
-    print('Nearest tokens by cosine:', [ (list(event_2_idx.keys())[i], float(sims[i])) for i in top_sim.indices ])
+# 5) Nearest tokens with the built-in gensim-style helper
+nearest = estimator.most_similar(positive=seq, topn=3)
+print('Nearest tokens by cosine:', [(inv[i], score) for i, score in nearest])
 
 with torch.no_grad():
     # 6) Next-event distribution from the current state
-    logits = torch_model.decoder(sequence_embedding.unsqueeze(0))    # [1, V]
+    seq_for_decoder = sequence_embedding.to(estimator.device)
+    logits = torch_model.decoder(seq_for_decoder.unsqueeze(0))    # [1, V]
     probs = torch.softmax(logits, dim=-1).squeeze(0)
     top = torch.topk(probs, k=3)
-    inv = {v:k for k,v in event_2_idx.items()}
     print('Top-3 next events:', [ (inv[i.item()], float(probs[i])) for i in top.indices ])
 
 # 7) Visualization: PCA of token embeddings + sequence embedding
@@ -163,7 +159,6 @@ with torch.no_grad():
     X2 = pca.fit_transform(X)
     tokens2, seq2 = X2[:-1], X2[-1]
 
-inv = {v:k for k,v in event_2_idx.items()}
 plt.figure(figsize=(6, 6))
 plt.scatter(tokens2[:, 0], tokens2[:, 1], c='gray', label='tokens')
 for i, (x, y) in enumerate(tokens2):
@@ -198,7 +193,10 @@ Key methods:
 - `fit`: optimizes embeddings with the additive loss from the paper.
 - `fit_transform`: convenience helper returning the encoded sequences after fitting.
 - `transform`: freezes weights and encodes arbitrary sequences, optionally returning PyTorch tensors for downstream models.
+- `most_similar`: gensim-style nearest-neighbor lookup over learned event embeddings using tokens or full sequences as queries.
 - `pad_sequences=True`: enables fully vectorized batches with masking for substantial throughput gains on large corpora.
+
+Device control: set `use_gpu=False` to force CPU even if CUDA/MPS is present, or pass an explicit `device` (e.g., `"cuda:0"` or `"cpu"`).
 
 
 ## References

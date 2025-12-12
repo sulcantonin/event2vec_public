@@ -148,6 +148,7 @@ class Event2Vec:
         num_epochs: int = 50,
         pad_sequences: bool = False,
         pad_value: int = 0,
+        use_gpu: bool = True,
         device: Optional[Union[str, torch.device]] = None,
     ):
         if num_event_types <= 0:
@@ -172,8 +173,14 @@ class Event2Vec:
         self.num_epochs = num_epochs
         self.pad_sequences = pad_sequences
         self.pad_value = pad_value
+        self.use_gpu = use_gpu
         if device is None:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            if use_gpu and torch.cuda.is_available():
+                device = torch.device("cuda")
+            elif use_gpu and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                device = torch.device("mps")
+            else:
+                device = torch.device("cpu")
         else:
             device = torch.device(device)
         self.device = device
@@ -297,6 +304,90 @@ class Event2Vec:
         if as_numpy:
             return embeddings.cpu().numpy()
         return embeddings
+
+    def most_similar(
+        self,
+        positive: Union[
+            int,
+            SequenceType,
+            torch.Tensor,
+            Sequence[Union[int, SequenceType, torch.Tensor]],
+        ],
+        negative: Optional[
+            Union[
+                int,
+                SequenceType,
+                torch.Tensor,
+                Sequence[Union[int, SequenceType, torch.Tensor]],
+            ]
+        ] = None,
+        topn: int = 10,
+        restrict_vocab: Optional[int] = None,
+        normalize: bool = True,
+        exclude: Optional[Sequence[int]] = None,
+    ):
+        """
+        Returns the most similar event ids to a target combination of tokens.
+        Mirrors gensim's `most_similar`: positive/negative can be token ids,
+        1-D int tensors or Python sequences (treated as event sequences and
+        encoded via the trained encoder), or pre-computed embedding vectors.
+        """
+        self._check_is_fitted()
+        if topn <= 0:
+            raise ValueError("topn must be positive.")
+        if positive is None and negative is None:
+            raise ValueError("At least one positive or negative item is required.")
+
+        pos_items = positive if isinstance(positive, (list, tuple)) else [positive]
+        neg_items = (
+            []
+            if negative is None
+            else negative
+            if isinstance(negative, (list, tuple))
+            else [negative]
+        )
+
+        def _extract_index(item):
+            if isinstance(item, int):
+                return item
+            if isinstance(item, torch.Tensor) and item.ndim == 0:
+                return int(item.item())
+            return None
+
+        exclude_set = set(exclude or [])
+        for item in pos_items + neg_items:
+            idx = _extract_index(item)
+            if idx is not None:
+                exclude_set.add(idx)
+
+        with torch.no_grad():
+            pos_vecs = [self._vector_from_input(item) for item in pos_items]
+            target_vec = torch.stack(pos_vecs).sum(dim=0)
+            if neg_items:
+                neg_vecs = [self._vector_from_input(item) for item in neg_items]
+                target_vec = target_vec - torch.stack(neg_vecs).sum(dim=0)
+
+            emb_matrix = self.model.embedding.weight.detach()
+            if restrict_vocab is not None:
+                emb_matrix = emb_matrix[:restrict_vocab]
+            target_vec = target_vec.to(emb_matrix.device)
+            if normalize:
+                target_vec = torch.nn.functional.normalize(target_vec, dim=0)
+                emb_matrix = torch.nn.functional.normalize(emb_matrix, dim=1)
+            sims = emb_matrix @ target_vec
+
+            if exclude_set:
+                mask_indices = torch.tensor(
+                    sorted(exclude_set), device=sims.device, dtype=torch.long
+                )
+                mask_indices = mask_indices[
+                    (mask_indices >= 0) & (mask_indices < sims.numel())
+                ]
+                sims[mask_indices] = -float("inf")
+
+            k = min(topn, emb_matrix.size(0))
+            values, indices = torch.topk(sims, k=k)
+        return [(idx.item(), float(val)) for idx, val in zip(indices, values)]
 
     def _standardize_sequences(
         self, sequences: Iterable[SequenceType]
@@ -471,4 +562,38 @@ class Event2Vec:
     def _check_is_fitted(self):
         if not self.is_fitted_:
             raise RuntimeError("Event2Vec instance is not fitted yet.")
+
+    def _vector_from_input(
+        self, item: Union[int, SequenceType, torch.Tensor]
+    ) -> torch.Tensor:
+        """
+        Converts an event id, a sequence of event ids, or an embedding vector
+        into a single embedding on the model device.
+        """
+        if isinstance(item, torch.Tensor):
+            if item.ndim == 0:
+                idx = item.long().to(self.device)
+                return self.model.embedding(idx).squeeze(0)
+            if item.dtype.is_floating_point and item.ndim == 1:
+                return item.to(self.device)
+            if item.dtype in (
+                torch.int64,
+                torch.int32,
+                torch.int16,
+                torch.int8,
+                torch.uint8,
+            ) and item.ndim == 1:
+                seq_tensor = item.long().cpu()
+                return self.transform([seq_tensor], as_numpy=False)[0].to(self.device)
+        if isinstance(item, int):
+            idx_tensor = torch.tensor(item, device=self.device)
+            return self.model.embedding(idx_tensor).squeeze(0)
+        if isinstance(item, (list, tuple)):
+            if len(item) == 0:
+                raise ValueError("Sequence inputs must be non-empty.")
+            seq_tensor = torch.tensor(item, dtype=torch.long)
+            return self.transform([seq_tensor], as_numpy=False)[0].to(self.device)
+        raise TypeError(
+            "Inputs must be event indices, 1-D int tensors, sequences, or embedding vectors."
+        )
 
