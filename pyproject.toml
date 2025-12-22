@@ -4,30 +4,63 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "event2vector"
-
-version = "0.1.0.2"
-description = "A geometric approach to learning composable representations of event sequences."
+version = "0.1.1"
+description = "Scikit-learn-style geometric embeddings for event sequences."
 readme = "README.md"
-authors = [
-  { name = "Antonin Sulc" },
-]
-license = { text = "MIT" }
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-]
 requires-python = ">=3.6"
+license = "MIT"
+
+authors = [
+  { name = "Antonin Sulc" }
+]
+
+keywords = [
+  "sequence-embedding",
+  "event-sequences",
+  "representation-learning",
+  "word2vec",
+  "scikit-learn",
+  "time-series"
+]
+
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Intended Audience :: Science/Research"
+]
+
 dependencies = [
-    "torch",
-    "numpy",
-    "tqdm",
-    "matplotlib",
-    "scikit-learn",
-    "openTSNE",
-    "gensim",
-    "seaborn",
+  "numpy",
+  "torch",
+  "scikit-learn",
+  "tqdm"
+]
+
+[project.optional-dependencies]
+viz = [
+  "matplotlib",
+  "seaborn"
+]
+
+manifold = [
+  "openTSNE"
+]
+
+nlp = [
+  "gensim"
+]
+
+dev = [
+  "pytest",
+  "black",
+  "ruff"
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/sulcantonin/event2vec_public"
+Homepage = "https://github.com/sulcantonin/event2vector"
+Repository = "https://github.com/sulcantonin/event2vector"
+Issues = "https://github.com/sulcantonin/event2vector/issues"
+
+[tool.setuptools.packages.find]
+include = ["event2vector*"]
