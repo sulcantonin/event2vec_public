@@ -42,6 +42,35 @@ cd event2vec_public
 pip install .
 ```
 
+## Estimator API
+
+The `Event2Vec` class mirrors scikit-learn transformers so it can slot into existing NLP pipelines:
+
+```python
+from event2vector import Event2Vec
+
+model = Event2Vec(
+    num_event_types=len(vocab),
+    geometry="euclidean",          # or "hyperbolic"
+    embedding_dim=128,
+    pad_sequences=True,            # mini-batch speed-up
+    num_epochs=50,
+)
+model.fit(train_sequences, verbose=True)
+train_embeddings = model.transform(train_sequences)         # numpy array
+test_embeddings = model.transform(test_sequences, as_numpy=False)  # PyTorch tensor
+```
+
+Key methods:
+- `fit`: optimizes embeddings with the additive loss from the paper.
+- `fit_transform`: convenience helper returning the encoded sequences after fitting.
+- `transform`: freezes weights and encodes arbitrary sequences, optionally returning PyTorch tensors for downstream models.
+- `most_similar`: gensim-style nearest-neighbor lookup over learned event embeddings using tokens or full sequences as queries.
+- `pad_sequences=True`: enables fully vectorized batches with masking for substantial throughput gains on large corpora.
+
+Device control: set `use_gpu=False` to force CPU even if CUDA/MPS is present, or pass an explicit `device` (e.g., `"cuda:0"` or `"cpu"`).
+
+
 
 ## Brown Corpus POS tagging example
 After installation, you can try to run Brown Part-of-Speech tagging example from the paper. 
@@ -169,35 +198,6 @@ plt.legend(loc='best')
 plt.tight_layout()
 plt.show()
 ```
-
-## Estimator API
-
-The `Event2Vec` class mirrors scikit-learn transformers so it can slot into existing NLP pipelines:
-
-```python
-from event2vector import Event2Vec
-
-model = Event2Vec(
-    num_event_types=len(vocab),
-    geometry="euclidean",          # or "hyperbolic"
-    embedding_dim=128,
-    pad_sequences=True,            # mini-batch speed-up
-    num_epochs=50,
-)
-model.fit(train_sequences, verbose=True)
-train_embeddings = model.transform(train_sequences)         # numpy array
-test_embeddings = model.transform(test_sequences, as_numpy=False)  # PyTorch tensor
-```
-
-Key methods:
-- `fit`: optimizes embeddings with the additive loss from the paper.
-- `fit_transform`: convenience helper returning the encoded sequences after fitting.
-- `transform`: freezes weights and encodes arbitrary sequences, optionally returning PyTorch tensors for downstream models.
-- `most_similar`: gensim-style nearest-neighbor lookup over learned event embeddings using tokens or full sequences as queries.
-- `pad_sequences=True`: enables fully vectorized batches with masking for substantial throughput gains on large corpora.
-
-Device control: set `use_gpu=False` to force CPU even if CUDA/MPS is present, or pass an explicit `device` (e.g., `"cuda:0"` or `"cpu"`).
-
 
 ## References
 For citations please use following Bibtex. 
