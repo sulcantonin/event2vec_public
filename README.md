@@ -51,14 +51,13 @@ from event2vector import Event2Vec
 
 model = Event2Vec(
     num_event_types=len(vocab),
-    geometry="euclidean",          # or "hyperbolic"
+    geometry="euclidean",
     embedding_dim=128,
-    pad_sequences=True,            # mini-batch speed-up
+    pad_sequences=True,
     num_epochs=50,
 )
 model.fit(train_sequences, verbose=True)
-train_embeddings = model.transform(train_sequences)         # numpy array
-test_embeddings = model.transform(test_sequences, as_numpy=False)  # PyTorch tensor
+train_embeddings = model.transform(train_sequences) 
 ```
 
 Key methods:
