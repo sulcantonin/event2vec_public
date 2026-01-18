@@ -26,6 +26,10 @@
 
 For more details, check *Sulc A., Event2Vector: A Geometric Approach to Learning Composable Representations of Event Sequences*
 
+## Example Applications
+* Substack Post: Geometry of Groceries https://sulcantonin.substack.com/p/the-geometry-of-groceries
+* Substack Post: The Geometry of Language Families https://sulcantonin.substack.com/p/the-geometry-of-language-families
+
 ## Installation
 
 Install the package directly from PyPI:
