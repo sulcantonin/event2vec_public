@@ -61,6 +61,33 @@ train_embeddings = model.transform(train_sequences)         # numpy array
 test_embeddings = model.transform(test_sequences, as_numpy=False)  # PyTorch tensor
 ```
 
+Hyperbolic variant (training + using trained weights):
+
+```python
+from event2vector import Event2Vec, HyperbolicUtils
+import torch
+
+hyp_model = Event2Vec(
+    num_event_types=len(vocab),
+    geometry="hyperbolic",
+    curvature=1.0,
+    embedding_dim=128,
+    pad_sequences=True,
+    num_epochs=50,
+)
+hyp_model.fit(train_sequences, verbose=True)
+
+# Use the trained weights: encode sequences and query the decoder
+seq_embeddings = hyp_model.transform(test_sequences, as_numpy=False)
+torch_model = hyp_model.model
+
+# Hyperbolic addition + distance between two datapoints (Poincaré ball)
+u = seq_embeddings[0]
+v = seq_embeddings[1]
+uv_added = HyperbolicUtils.mobius_add(u, v, hyp_model.curvature)
+uv_dist = HyperbolicUtils.poincare_dist_sq(u, v, hyp_model.curvature).sqrt()
+```
+
 Key methods:
 - `fit`: optimizes embeddings with the additive loss from the paper.
 - `fit_transform`: convenience helper returning the encoded sequences after fitting.
@@ -198,6 +225,16 @@ plt.legend(loc='best')
 plt.tight_layout()
 plt.show()
 ```
+
+## Minimal example script
+
+The repository includes a runnable minimal example that trains a tiny model end-to-end and prints example outputs (loss, embeddings, and nearest tokens). Run it from the repo root:
+
+```bash
+python3 examples/minimal_example.py
+```
+
+To try a hyperbolic run, open `examples/minimal_example.py` and set `geometry="hyperbolic"` in the `Event2Vec` constructor, then rerun the script.
 
 ## References
 For citations please use following Bibtex. 

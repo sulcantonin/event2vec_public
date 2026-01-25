@@ -435,12 +435,23 @@ class Event2Vec:
                 target = seq[t + 1].unsqueeze(0)
                 h_old = h.detach()
                 y1, h1, e_curr1 = self.model(x, h_old)
-                y2, h2, e_curr2 = self.model(x, h_old)
+                _, h2, _ = self.model(x, h_old)
 
                 prediction_loss = self.ce_loss(y1, target)
-                h_reconstructed = h1 - e_curr1
-                reconstruction_loss = self.mse_loss(h_reconstructed, h_old)
-                consistency_loss = self.mse_loss(h1, h2)
+                if self.geometry == "hyperbolic":
+                    h_reconstructed = HyperbolicUtils.mobius_add(
+                        h1, -e_curr1, self.curvature
+                    )
+                    reconstruction_loss = HyperbolicUtils.poincare_dist_sq(
+                        h_reconstructed, h_old, self.curvature
+                    ).mean()
+                    consistency_loss = HyperbolicUtils.poincare_dist_sq(
+                        h1, h2, self.curvature
+                    ).mean()
+                else:
+                    h_reconstructed = h1 - e_curr1
+                    reconstruction_loss = self.mse_loss(h_reconstructed, h_old)
+                    consistency_loss = self.mse_loss(h1, h2)
 
                 combined_loss = (
                     prediction_loss
@@ -488,12 +499,23 @@ class Event2Vec:
             h_old = h[idx].detach()
 
             y1, h1, e_curr1 = self.model(x, h_old)
-            y2, h2, e_curr2 = self.model(x, h_old)
+            _, h2, _ = self.model(x, h_old)
 
             prediction_loss = self.ce_loss(y1, target)
-            h_reconstructed = h1 - e_curr1
-            reconstruction_loss = self.mse_loss(h_reconstructed, h_old)
-            consistency_loss = self.mse_loss(h1, h2)
+            if self.geometry == "hyperbolic":
+                h_reconstructed = HyperbolicUtils.mobius_add(
+                    h1, -e_curr1, self.curvature
+                )
+                reconstruction_loss = HyperbolicUtils.poincare_dist_sq(
+                    h_reconstructed, h_old, self.curvature
+                ).mean()
+                consistency_loss = HyperbolicUtils.poincare_dist_sq(
+                    h1, h2, self.curvature
+                ).mean()
+            else:
+                h_reconstructed = h1 - e_curr1
+                reconstruction_loss = self.mse_loss(h_reconstructed, h_old)
+                consistency_loss = self.mse_loss(h1, h2)
 
             combined_loss = (
                 prediction_loss
