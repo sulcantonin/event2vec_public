@@ -100,15 +100,46 @@ Key methods:
 
 Device control: set `use_gpu=False` to force CPU even if CUDA/MPS is present, or pass an explicit `device` (e.g., `"cuda:0"` or `"cpu"`).
 
+## Geometries (v0.2)
 
+Beyond `euclidean` and `hyperbolic`, the estimator exposes the paper's pilot geometries as first-class `geometry=` backbones, each the natural home of a structure the additive endpoint cannot carry. They share the same estimator and a generic gyrogroup/Lie-group left-cancellation reconstruction loss.
+
+| `geometry` | update | best for |
+|---|---|---|
+| `euclidean` | vector addition | order-invariant bag of events, exact decomposition |
+| `hyperbolic` | Möbius addition (curvature `c>0`) | hierarchical / tree-like structure |
+| `stereographic` | κ-gyroaddition (signed `kappa`) | unified curvature: `kappa<0` hyperbolic, `0` Euclidean, `>0` spherical |
+| `spherical` | κ-gyroaddition (`kappa>0`) | cyclic / modular (periodic) structure |
+| `rotation` | left `SO(n)` product | non-commutative orientation (order matters) |
+| `heisenberg` | Heisenberg group product | order-dependent signed (Lévy) area |
+| `product` | per-factor update | two structure types at once (e.g. hyperbolic × spherical) |
+
+```python
+from event2vector import Event2Vec
+
+# one unified curvature dial: kappa<0 hyperbolic, 0 Euclidean, >0 spherical
+model = Event2Vec(num_event_types=len(vocab), geometry="stereographic", kappa=-1.0)
+
+# non-commutative orientation (SO(3))
+model = Event2Vec(num_event_types=len(vocab), geometry="rotation", rotation_n=3)
+
+# product of a hyperbolic and a spherical factor
+model = Event2Vec(num_event_types=len(vocab), geometry="product", product_kappas=(-1.0, 1.0))
+```
+
+Reproduce the curvature sweep on a real knowledge graph (auto-downloads WN18RR):
+
+```bash
+python3 -m scripts.run_kg_curvature   # next-relation accuracy vs kappa
+```
 
 ## Brown Corpus POS tagging example
 After installation, you can try to run Brown Part-of-Speech tagging example from the paper. 
 
 ```bash
-python3 -m experiments.prepare_brown_data.py
-python3 -m experiments.train_brown_data.py
-python3 -m experiments.visualize_brown_corpus.py
+python3 -m examples.prepare_brown_data
+python3 -m examples.train_brown_data
+python3 -m examples.visualize_brown_corpus
 ```
 
 
@@ -121,6 +152,34 @@ python3 examples/minimal_example.py
 ```
 
 To try a hyperbolic run, open `examples/minimal_example.py` and set `geometry="hyperbolic"` in the `Event2Vec` constructor, then rerun the script.
+
+## Reproducing the paper experiments
+
+The journal experiments are built around domains with *exact ground truth* for the
+additive structure, so interpretability is measured rather than visualized:
+
+```bash
+# Physics (nuclear decay) + Math (group sequences): exact-ground-truth centerpiece
+python3 -m scripts.run_centerpiece --seeds 5 --epochs 20 --out results/centerpiece
+
+# Synthetic life-path workbench (order-sensitivity-vs-curvature, additivity decay)
+python3 -m scripts.run_lifepath --seeds 5 --out results/lifepath
+```
+
+Datasets live in `event2vector/datasets/` and all return a uniform record
+(`sequences`, `processed_sequences`, `vocab`, `labels`, `graph`):
+
+- `make_decay()`: radioactive decay chains; each event is an exact `(ΔZ, ΔN)` so
+  additivity coincides with conservation laws (metric: `operator_recovery`).
+- `make_group(name)`: Cayley-graph walks on abelian/non-abelian groups; the
+  additive endpoint provably equals the abelianization (metric: `abelianization_gap`).
+- `make_lifepath()`, `load_brown()`: controlled synthetic + real (POS) workbench.
+- `load_gdelt()`, `load_sec_8k()`, `load_synthea()`, ...: real-world event streams
+  (require a public data download; see each loader's docstring).
+
+Metrics (`event2vector.metrics`) and the seeded harness (`event2vector.eval`) are
+reusable across datasets; baselines (GRU/LSTM/Transformer/Word2Vec) are in
+`event2vector.baselines`. Run the test suite with `pytest tests/ -q`.
 
 ## References
 For citations please use following Bibtex. 

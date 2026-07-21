@@ -7,6 +7,19 @@ def generate_sequences(event_types, event_transitions, initial, terminal, num_se
     Generates synthetic sequences of events based on a state transition graph.
     This function simulates realistic life trajectories by performing a guided
     random walk on the graph.
+
+    Note the walk is only 90% faithful to ``event_transitions``: with probability
+    0.1 (and always from a node with no outgoing edges) it teleports to a uniformly
+    chosen event type. That noise is deliberate, but it has two consequences worth
+    stating, because the record returned by ``make_lifepath`` advertises the graph
+    as ground truth:
+
+      * roughly 10% of observed transitions are NOT edges of the graph, so the
+        graph explains ~90% of the data, not all of it;
+      * event types unreachable from ``initial`` still occur in the data. In the
+        lifepath graph 5 of the 64 types (adoption, inheritance, job_loss,
+        military_service, widowhood) are unreachable from ``birth`` and appear
+        only via this teleport.
     """
     sequences = []
     for _ in range(num_seq):

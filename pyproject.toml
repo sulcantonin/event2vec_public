@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "event2vector"
-version = "0.1.2"
+version = "0.3.0"
 description = "Scikit-learn-style geometric embeddings for event sequences."
 readme = "README.md"
-requires-python = ">=3.6"
+requires-python = ">=3.9"
 license = "MIT"
 
 authors = [
@@ -31,10 +31,10 @@ classifiers = [
 ]
 
 dependencies = [
-  "numpy",
-  "torch",
-  "scikit-learn",
-  "tqdm"
+  "numpy>=1.21",
+  "torch>=1.13",
+  "scikit-learn>=1.0",
+  "tqdm>=4.0"
 ]
 
 [project.optional-dependencies]
@@ -49,6 +49,11 @@ manifold = [
 
 nlp = [
   "gensim"
+]
+
+# Optional Riemannian optimization for the hyperbolic model (geoopt).
+hyperbolic = [
+  "geoopt>=0.5"
 ]
 
 dev = [
