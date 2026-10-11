@@ -98,7 +98,7 @@ Key methods:
 - `most_similar`: gensim-style nearest-neighbor lookup over learned event embeddings using tokens or full sequences as queries.
 - `pad_sequences=True`: enables fully vectorized batches with masking for substantial throughput gains on large corpora.
 
-Device control: set `use_gpu=False` to force CPU even if CUDA/MPS is present, or pass an explicit `device` (e.g., `"cuda:0"` or `"cpu"`).
+Device control: set `use_gpu=False` to force CPU even if CUDA/MPS is present, or pass an explicit `device` (e.g., `"cuda:0"` or `"cpu"`). On Apple Silicon the `rotation` geometry defaults to the CPU, because MPS has no `matrix_exp` kernel and the CPU is faster for it; pass `device="mps"` to override.
 
 ## Geometries (v0.2)
 

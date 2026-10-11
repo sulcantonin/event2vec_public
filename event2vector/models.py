@@ -249,7 +249,18 @@ class Event2Vec:
             if use_gpu and torch.cuda.is_available():
                 device = torch.device("cuda")
             elif use_gpu and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                device = torch.device("mps")
+                if self.geometry == "rotation":
+                    # MPS has no matrix_exp, so every rotation step would round-trip
+                    # through the CPU; for a model this small the CPU is much faster.
+                    warnings.warn(
+                        "geometry='rotation' needs torch.matrix_exp, which MPS does not "
+                        "implement; using device='cpu'. Pass device='mps' to run on MPS "
+                        "anyway (matrix_exp is then computed on the CPU).",
+                        RuntimeWarning,
+                    )
+                    device = torch.device("cpu")
+                else:
+                    device = torch.device("mps")
             else:
                 device = torch.device("cpu")
         else:
