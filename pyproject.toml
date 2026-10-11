@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "event2vector"
-version = "0.3.0"
+version = "0.3.1"
 description = "Scikit-learn-style geometric embeddings for event sequences."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -66,6 +66,7 @@ dev = [
 Homepage = "https://github.com/sulcantonin/event2vec_public"
 Repository = "https://github.com/sulcantonin/event2vec_public"
 Issues = "https://github.com/sulcantonin/event2vec_public/issues"
+Changelog = "https://github.com/sulcantonin/event2vec_public/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 include = ["event2vector*"]
