@@ -63,9 +63,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/sulcantonin/event2vector"
-Repository = "https://github.com/sulcantonin/event2vector"
-Issues = "https://github.com/sulcantonin/event2vector/issues"
+Homepage = "https://github.com/sulcantonin/event2vec_public"
+Repository = "https://github.com/sulcantonin/event2vec_public"
+Issues = "https://github.com/sulcantonin/event2vec_public/issues"
 
 [tool.setuptools.packages.find]
 include = ["event2vector*"]
