@@ -216,6 +216,10 @@ class RotationModel(nn.Module):
         a = torch.zeros(b, self.n, self.n, device=gen.device, dtype=gen.dtype)
         a[:, self.triu_i, self.triu_j] = gen
         a = a - a.transpose(1, 2)
+        if a.device.type == "mps":
+            # MPS has no matrix_exp kernel (pytorch/pytorch#141287); compute it on
+            # the CPU and move it back. Both transfers are differentiable.
+            return torch.matrix_exp(a.cpu()).to(a.device)
         return torch.matrix_exp(a)
 
     def zero_state(self, batch, device):
