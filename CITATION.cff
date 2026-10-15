@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-message: "If you use event2vector, please cite the paper below."
+message: "If you use event2vector, please cite the paper below (PMLR vol. 282)."
 title: "event2vector: geometric embeddings for event sequences"
 type: software
 authors:
@@ -17,11 +17,17 @@ keywords:
   - representation-learning
   - geometric deep learning
 preferred-citation:
-  type: article
+  type: conference-paper
   title: "Event2Vec: A Geometric Approach to Learning Composable Representations of Event Sequences"
   authors:
     - family-names: Sulc
       given-names: Antonin
-  journal: "arXiv preprint arXiv:2509.12188"
-  year: 2025
-  url: "https://arxiv.org/abs/2509.12188"
+  collection-title: "Proceedings of the 4th (2025) and 3rd (2024) NeurIPS Workshops on Symmetry and Geometry in Neural Representations"
+  collection-type: proceedings
+  volume: 282
+  start: 492
+  end: 512
+  year: 2026
+  publisher:
+    name: PMLR
+  url: "https://proceedings.mlr.press/v282/sulc26a.html"

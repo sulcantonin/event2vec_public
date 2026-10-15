@@ -5,3 +5,5 @@ dist/
 *.pkl
 *.png
 *.model
+# README figures are tracked
+!images/*.png

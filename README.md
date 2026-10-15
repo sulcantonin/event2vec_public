@@ -1,6 +1,11 @@
 <div align="center">
 
-# Event2Vector
+<a href="https://event2vec.com">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/sulcantonin/event2vec_public/main/images/logo-dark.svg">
+    <img alt="event2vec" src="https://raw.githubusercontent.com/sulcantonin/event2vec_public/main/images/logo-light.svg" width="300">
+  </picture>
+</a>
 
 **Interpretable, composable embeddings for sequences of discrete events.**
 
@@ -8,9 +13,10 @@
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23399003.svg)](https://doi.org/10.5281/zenodo.23399003)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![PMLR](https://img.shields.io/badge/PMLR-vol.%20282-1f4e79.svg)](https://proceedings.mlr.press/v282/sulc26a.html)
 [![arXiv](https://img.shields.io/badge/arXiv-2509.12188-b31b1b.svg)](https://arxiv.org/abs/2509.12188)
 
-**[event2vec.com](https://event2vec.com)** · [Paper](https://arxiv.org/abs/2509.12188) · [Changelog](https://github.com/sulcantonin/event2vec_public/blob/main/CHANGELOG.md) · [Issues](https://github.com/sulcantonin/event2vec_public/issues)
+**[event2vec.com](https://event2vec.com)** · [Paper](https://proceedings.mlr.press/v282/sulc26a.html) · [Changelog](https://github.com/sulcantonin/event2vec_public/blob/main/CHANGELOG.md) · [Issues](https://github.com/sulcantonin/event2vec_public/issues)
 
 ![Event2Vector teaser](https://raw.githubusercontent.com/sulcantonin/event2vec_public/main/images/teaser.png)
 
@@ -95,7 +101,7 @@ step:
 
 There is no attention and no hidden nonlinearity in the state update, which is
 what keeps every embedding a readable composition of its events. See the
-[paper](https://arxiv.org/abs/2509.12188) for details.
+[paper](https://proceedings.mlr.press/v282/sulc26a.html) for details.
 
 ## Geometries
 
@@ -112,6 +118,13 @@ and a generic left-cancellation reconstruction loss.
 | `heisenberg` | Heisenberg group product | order-dependent signed (Lévy) area |
 | `affine` | `x ↦ exp(M_e) x + v_e` on the left | events that act on the history (shrink, stretch, rotate it), not only add to it |
 | `product` | per-factor update | two structure types at once, e.g. hyperbolic × spherical |
+
+![The same three events composed by each geometry](https://raw.githubusercontent.com/sulcantonin/event2vec_public/main/images/geometries.png)
+
+*The same three events composed by each geometry, in order a·b·c (blue) and c·b·a
+(red). The Euclidean sum ends in the same place either way; where the endpoints
+separate, the geometry remembers order. Drawn by the library's own model classes
+with `python images/make_readme_figures.py`.*
 
 ```python
 Event2Vec(num_event_types=len(vocab), geometry="hyperbolic", curvature=1.0)
@@ -242,9 +255,11 @@ A minimal end-to-end run (loss, embeddings, nearest events):
 python3 examples/minimal_example.py
 ```
 
-Part-of-speech sequences from the Brown corpus:
+Part-of-speech sequences from the Brown corpus (the scripts need a few extra
+packages: NLTK for the corpus, t-SNE and Word2Vec for the comparison plots):
 
 ```bash
+pip install "event2vector[viz,manifold,nlp]" nltk
 python3 -m examples.prepare_brown_data
 python3 -m examples.train_brown_data
 python3 -m examples.visualize_brown_corpus
@@ -268,16 +283,26 @@ Bug reports and questions are welcome in the
 
 ## Citation
 
-If you use Event2Vector, please cite the paper:
+If you use Event2Vector, please cite the paper, published in the
+[Proceedings of Machine Learning Research](https://proceedings.mlr.press/v282/sulc26a.html) (vol. 282, NeurIPS Workshops
+on Symmetry and Geometry in Neural Representations):
 
 ```bibtex
-@article{sulc2025event2vec,
-  title   = {Event2Vec: A Geometric Approach to Learning Composable Representations of Event Sequences},
-  author  = {Sulc, Antonin},
-  journal = {arXiv preprint arXiv:2509.12188},
-  year    = {2025}
+@InProceedings{pmlr-v282-sulc26a,
+  title     = {Event2Vec: A Geometric Approach to Learning Composable Representations of Event Sequences},
+  author    = {Sulc, Antonin},
+  booktitle = {Proceedings of the 4th (2025) and 3rd (2024) NeurIPS Workshops on Symmetry and Geometry in Neural Representations},
+  pages     = {492--512},
+  year      = {2026},
+  editor    = {Acosta, Francisco and Azeglio, Simone and Tolooshams, Bahareh and van de Geijn, Chase and Shewmake, Christian and Sanborn, Sophia and Miolane, Nina},
+  volume    = {282},
+  series    = {Proceedings of Machine Learning Research},
+  publisher = {PMLR},
+  url       = {https://proceedings.mlr.press/v282/sulc26a.html}
 }
 ```
+
+A preprint is on [arXiv:2509.12188](https://arxiv.org/abs/2509.12188).
 
 To cite the software itself, use its Zenodo DOI
 [10.5281/zenodo.23399003](https://doi.org/10.5281/zenodo.23399003), which always
