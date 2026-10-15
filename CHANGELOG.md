@@ -4,6 +4,28 @@ All notable changes to `event2vector` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-10-15
+
+Documentation and metadata only; the code is unchanged from 0.4.0.
+
+### Changed
+
+- The paper is published in the Proceedings of Machine Learning Research
+  (vol. 282): the README citation, the "Paper" link and `CITATION.cff` (GitHub's
+  "Cite this repository" and Zenodo) now point to
+  [PMLR](https://proceedings.mlr.press/v282/sulc26a.html); arXiv is kept as the
+  preprint.
+- Rewritten README: quickstart, how training works, the geometries with a figure
+  of the same events composed by each geometry, a parameter and method
+  reference, devices, datasets, examples, citation, and the event2vec logo.
+- The Brown corpus example's extra requirements are documented
+  (`pip install "event2vector[viz,manifold,nlp]" nltk`).
+
+### Added
+
+- `images/make_readme_figures.py`, which redraws the README's logo and geometry
+  figure from the library's own model classes.
+
 ## [0.4.0] - 2026-10-15
 
 ### Added
@@ -59,6 +81,7 @@ All notable changes to `event2vector` are documented here. The format follows
 
 Earlier releases are listed on [PyPI](https://pypi.org/project/event2vector/#history).
 
+[0.4.1]: https://pypi.org/project/event2vector/0.4.1/
 [0.4.0]: https://pypi.org/project/event2vector/0.4.0/
 [0.3.1]: https://pypi.org/project/event2vector/0.3.1/
 [0.3.0]: https://pypi.org/project/event2vector/0.3.0/
