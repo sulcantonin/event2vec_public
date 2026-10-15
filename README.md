@@ -5,10 +5,12 @@
 
 [![PyPI version](https://badge.fury.io/py/event2vector.svg)](https://badge.fury.io/py/event2vector) [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23399003.svg)](https://doi.org/10.5281/zenodo.23399003)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.6+](https://img.shields.io/badge/python-3.6+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![arXiv](https://img.shields.io/badge/arXiv-2509.12188-b31b1b.svg)](https://arxiv.org/abs/2509.12188)
 
-![](https://github.com/sulcantonin/event2vec_public/blob/main/images/teaser.png)
+**[event2vec.com](https://event2vec.com)** · [Changelog](https://github.com/sulcantonin/event2vec_public/blob/main/CHANGELOG.md) · `pip install event2vector`
+
+![Event2Vector teaser](https://raw.githubusercontent.com/sulcantonin/event2vec_public/main/images/teaser.png)
 
 </div>
 
@@ -18,9 +20,10 @@
 
 ## Key Concepts
 * **Linear Additive Hypothesis**: The core idea behind Event2Vector is that the representation of an event sequence can be modeled as the vector sum of the embeddings of its individual events. This allows for intuitive vector arithmetic, enabling the composition and decomposition of event trajectories.
-* **Euclidean and Hyperbolic Models**: Event2Vector is offered in two geometric variants:
-    * **Euclidean model**: Uses standard vector addition, providing a straightforward, flat geometry for event trajectories.
-    * **Hyperbolic model**: Employs Möbius addition, which is better suited for hierarchical data structures, as it can embed tree-like patterns with less distortion.
+* **Geometries**: the same estimator runs on eight geometries (see [Geometries](#geometries)):
+    * **Euclidean**: standard vector addition, a flat, order-invariant geometry with exact decomposition.
+    * **Hyperbolic**: Möbius addition, better suited to hierarchical data, as it embeds tree-like patterns with less distortion.
+    * **Stereographic, spherical, rotation, Heisenberg, affine and product**: curvature, cyclic structure, order sensitivity and events that act on the history, all behind one `geometry=` argument.
 * **Estimator API**: A scikit-learn style `Event2Vec` estimator exposes `fit`, `fit_transform`, and `transform`, enabling drop-in use inside pipelines while keeping the compositional recurrent loss from the paper.
 * **Padded batching**: Optional padding allows entire minibatches of variable-length sequences to be processed in parallel, significantly accelerating training on large corpora without changing model behavior.
 
@@ -100,9 +103,9 @@ Key methods:
 
 Device control: set `use_gpu=False` to force CPU even if CUDA/MPS is present, or pass an explicit `device` (e.g., `"cuda:0"` or `"cpu"`). On Apple Silicon the `rotation` and `affine` geometries default to the CPU, because MPS has no `matrix_exp` kernel and the CPU is faster for them; pass `device="mps"` to override.
 
-## Geometries (v0.2)
+## Geometries
 
-Beyond `euclidean` and `hyperbolic`, the estimator exposes the paper's pilot geometries as first-class `geometry=` backbones, each the natural home of a structure the additive endpoint cannot carry. They share the same estimator and a generic gyrogroup/Lie-group left-cancellation reconstruction loss.
+Beyond `euclidean` and `hyperbolic`, the estimator exposes further geometries as first-class `geometry=` backbones, each the natural home of a structure the additive endpoint cannot carry. They share the same estimator and a generic gyrogroup/Lie-group left-cancellation reconstruction loss.
 
 | `geometry` | update | best for |
 |---|---|---|
@@ -128,7 +131,7 @@ model = Event2Vec(num_event_types=len(vocab), geometry="rotation", rotation_n=3)
 model = Event2Vec(num_event_types=len(vocab), geometry="product", product_kappas=(-1.0, 1.0))
 ```
 
-### Affine geometry (v0.4)
+### Affine geometry
 
 In the additive geometries an event always pushes the same way. With
 `geometry="affine"` each event is an invertible affine map
@@ -161,12 +164,6 @@ Options: `affine_readout="point"` (default; the decoder reads `b`) or `"full"`
 (it also reads `A`), and `affine_max_log_scale` to bound how strongly a single
 event can stretch or shrink the state.
 
-Reproduce the curvature sweep on a real knowledge graph (auto-downloads WN18RR):
-
-```bash
-python3 -m scripts.run_kg_curvature   # next-relation accuracy vs kappa
-```
-
 ## Brown Corpus POS tagging example
 After installation, you can try to run Brown Part-of-Speech tagging example from the paper. 
 
@@ -190,14 +187,23 @@ To try a hyperbolic run, open `examples/minimal_example.py` and set `geometry="h
 ## Reproducing the paper experiments
 
 The journal experiments are built around domains with *exact ground truth* for the
-additive structure, so interpretability is measured rather than visualized:
+additive structure, so interpretability is measured rather than visualized. The
+experiment scripts are not part of the package; they live on the
+[`paper/nldl-path2vector`](https://github.com/sulcantonin/event2vec_public/tree/paper/nldl-path2vector)
+branch:
 
 ```bash
+git clone -b paper/nldl-path2vector https://github.com/sulcantonin/event2vec_public.git
+cd event2vec_public && pip install .
+
 # Physics (nuclear decay) + Math (group sequences): exact-ground-truth centerpiece
 python3 -m scripts.run_centerpiece --seeds 5 --epochs 20 --out results/centerpiece
 
 # Synthetic life-path workbench (order-sensitivity-vs-curvature, additivity decay)
 python3 -m scripts.run_lifepath --seeds 5 --out results/lifepath
+
+# Curvature sweep on a real knowledge graph (auto-downloads WN18RR)
+python3 -m scripts.run_kg_curvature   # next-relation accuracy vs kappa
 ```
 
 Datasets live in `event2vector/datasets/` and all return a uniform record
@@ -213,7 +219,7 @@ Datasets live in `event2vector/datasets/` and all return a uniform record
 
 Metrics (`event2vector.metrics`) and the seeded harness (`event2vector.eval`) are
 reusable across datasets; baselines (GRU/LSTM/Transformer/Word2Vec) are in
-`event2vector.baselines`. Run the test suite with `pytest tests/ -q`.
+`event2vector.baselines` (all part of the package). Run the test suite with `pytest tests/ -q`.
 
 ## References
 For citations please use following Bibtex. 
