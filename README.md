@@ -184,27 +184,10 @@ python3 examples/minimal_example.py
 
 To try a hyperbolic run, open `examples/minimal_example.py` and set `geometry="hyperbolic"` in the `Event2Vec` constructor, then rerun the script.
 
-## Reproducing the paper experiments
+## Datasets, metrics and baselines
 
-The journal experiments are built around domains with *exact ground truth* for the
-additive structure, so interpretability is measured rather than visualized. The
-experiment scripts are not part of the package; they live on the
-[`paper/nldl-path2vector`](https://github.com/sulcantonin/event2vec_public/tree/paper/nldl-path2vector)
-branch:
-
-```bash
-git clone -b paper/nldl-path2vector https://github.com/sulcantonin/event2vec_public.git
-cd event2vec_public && pip install .
-
-# Physics (nuclear decay) + Math (group sequences): exact-ground-truth centerpiece
-python3 -m scripts.run_centerpiece --seeds 5 --epochs 20 --out results/centerpiece
-
-# Synthetic life-path workbench (order-sensitivity-vs-curvature, additivity decay)
-python3 -m scripts.run_lifepath --seeds 5 --out results/lifepath
-
-# Curvature sweep on a real knowledge graph (auto-downloads WN18RR)
-python3 -m scripts.run_kg_curvature   # next-relation accuracy vs kappa
-```
+The package ships the domains used to measure interpretability against *exact
+ground truth* for the additive structure, rather than only visualizing it.
 
 Datasets live in `event2vector/datasets/` and all return a uniform record
 (`sequences`, `processed_sequences`, `vocab`, `labels`, `graph`):
