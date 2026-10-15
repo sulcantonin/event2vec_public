@@ -5,7 +5,7 @@ type: software
 authors:
   - family-names: Sulc
     given-names: Antonin
-version: 0.4.0
+version: 0.4.1
 doi: 10.5281/zenodo.23399003
 date-released: 2026-10-15
 license: MIT
