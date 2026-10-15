@@ -3,3 +3,4 @@ include CHANGELOG.md
 exclude *.pkl
 exclude *.model
 exclude data/*
+include CITATION.cff

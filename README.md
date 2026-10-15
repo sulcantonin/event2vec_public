@@ -98,7 +98,7 @@ Key methods:
 - `most_similar`: gensim-style nearest-neighbor lookup over learned event embeddings using tokens or full sequences as queries.
 - `pad_sequences=True`: enables fully vectorized batches with masking for substantial throughput gains on large corpora.
 
-Device control: set `use_gpu=False` to force CPU even if CUDA/MPS is present, or pass an explicit `device` (e.g., `"cuda:0"` or `"cpu"`). On Apple Silicon the `rotation` geometry defaults to the CPU, because MPS has no `matrix_exp` kernel and the CPU is faster for it; pass `device="mps"` to override.
+Device control: set `use_gpu=False` to force CPU even if CUDA/MPS is present, or pass an explicit `device` (e.g., `"cuda:0"` or `"cpu"`). On Apple Silicon the `rotation` and `affine` geometries default to the CPU, because MPS has no `matrix_exp` kernel and the CPU is faster for them; pass `device="mps"` to override.
 
 ## Geometries (v0.2)
 
@@ -112,6 +112,7 @@ Beyond `euclidean` and `hyperbolic`, the estimator exposes the paper's pilot geo
 | `spherical` | κ-gyroaddition (`kappa>0`) | cyclic / modular (periodic) structure |
 | `rotation` | left `SO(n)` product | non-commutative orientation (order matters) |
 | `heisenberg` | Heisenberg group product | order-dependent signed (Lévy) area |
+| `affine` | `x -> exp(M_e) x + v_e` on the left | events that act on the history (shrink, stretch, rotate it), not only add to it |
 | `product` | per-factor update | two structure types at once (e.g. hyperbolic × spherical) |
 
 ```python
@@ -126,6 +127,39 @@ model = Event2Vec(num_event_types=len(vocab), geometry="rotation", rotation_n=3)
 # product of a hyperbolic and a spherical factor
 model = Event2Vec(num_event_types=len(vocab), geometry="product", product_kappas=(-1.0, 1.0))
 ```
+
+### Affine geometry (v0.4)
+
+In the additive geometries an event always pushes the same way. With
+`geometry="affine"` each event is an invertible affine map
+`x -> exp(M_e) x + v_e`, so the same event contributes differently depending on
+what came before, while the model stays a group:
+
+- with every `M_e = 0` (the initialisation) the point is exactly the Euclidean sum,
+  so training starts from the additive model;
+- every step is invertible and the reconstruction loss recovers it exactly;
+- any subsequence composes into a single affine map, so its effect on *any*
+  history is one `A x + v`.
+
+The state is the whole map `[vec(A), b]`; the point to plot is `b`, the image of
+the origin (`model.model.point(...)`). The singular values of a subsequence's `A`
+say how much it overrides what came before: `1` passes the history through,
+`< 1` erases it along that direction.
+
+```python
+model = Event2Vec(num_event_types=len(vocab), geometry="affine", embedding_dim=2)
+model.fit(sequences)
+
+states = model.transform(sequences, as_numpy=False)  # [vec(A), b] per sequence
+points = model.model.point(states)                   # (n, 2) points to plot
+
+A, v = model.model.compose([3, 7, 1])                # one map for a subsequence
+print(model.model.override_strength([3, 7, 1]))      # its singular values
+```
+
+Options: `affine_readout="point"` (default; the decoder reads `b`) or `"full"`
+(it also reads `A`), and `affine_max_log_scale` to bound how strongly a single
+event can stretch or shrink the state.
 
 Reproduce the curvature sweep on a real knowledge graph (auto-downloads WN18RR):
 

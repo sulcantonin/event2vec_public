@@ -17,6 +17,10 @@ rotation (SO(n))   left matrix product          non-commutative orientation;
                                                 abelianization
 heisenberg         nilpotent group product      the signed (Levy) area / commutator,
                                                 a purely order-dependent quantity
+affine (Aff+(d))   x -> exp(M_e) x + v_e        events that act on the history
+                   on the left                  (shrink / stretch / rotate it) as
+                                                well as add to it; M_e = 0 is
+                                                exactly the Euclidean sum
 product            per-factor update            two structure types at once
                                                 (e.g. hierarchy H x cycle S)
 ================  ===========================  ===================================
@@ -33,6 +37,22 @@ import torch
 import torch.nn as nn
 
 EPS = 1e-5
+
+
+def _matrix_exp(a):
+    """torch.matrix_exp that also works for MPS tensors: MPS has no matrix_exp
+    kernel (pytorch/pytorch#141287), so it is computed on the CPU and moved back.
+    Both transfers are differentiable."""
+    if a.device.type == "mps":
+        return torch.matrix_exp(a.cpu()).to(a.device)
+    return torch.matrix_exp(a)
+
+
+def _solve(a, b):
+    """torch.linalg.solve, computed on the CPU for MPS tensors (as above)."""
+    if a.device.type == "mps":
+        return torch.linalg.solve(a.cpu(), b.cpu()).to(a.device)
+    return torch.linalg.solve(a, b)
 
 
 # --------------------------------------------------------------------------- #
@@ -216,11 +236,7 @@ class RotationModel(nn.Module):
         a = torch.zeros(b, self.n, self.n, device=gen.device, dtype=gen.dtype)
         a[:, self.triu_i, self.triu_j] = gen
         a = a - a.transpose(1, 2)
-        if a.device.type == "mps":
-            # MPS has no matrix_exp kernel (pytorch/pytorch#141287); compute it on
-            # the CPU and move it back. Both transfers are differentiable.
-            return torch.matrix_exp(a.cpu()).to(a.device)
-        return torch.matrix_exp(a)
+        return _matrix_exp(a)
 
     def zero_state(self, batch, device):
         return torch.eye(self.n, device=device).reshape(1, -1).repeat(batch, 1)
@@ -331,6 +347,152 @@ class HeisenbergModel(nn.Module):
 
     def dist2(self, a, b):
         return ((a - b) ** 2).sum(-1, keepdim=True)
+
+
+# --------------------------------------------------------------------------- #
+# Affine group model: events that act on the history, not only add to it
+# --------------------------------------------------------------------------- #
+class AffineModel(nn.Module):
+    """State is an orientation-preserving affine map ``x -> A x + b`` of R^d,
+    stored flat as ``[vec(A), b]`` and starting at the identity. Each event is the
+    affine map ``x -> exp(M_e) x + v_e`` applied on the left::
+
+        A_t = exp(M_e) A_{t-1}            b_t = exp(M_e) b_{t-1} + v_e
+
+    ``b`` is the sequence's *point* (the image of the origin). With every
+    ``M_e = 0`` it is exactly the Euclidean sum of the ``v_e``, so this geometry
+    contains event2vec's additive model and starts training from it.
+
+    The linear part lets an event act on what came before -- shrink, stretch or
+    rotate it -- so the same event contributes differently after different
+    histories, while the model stays a group: every step is invertible (``exp``
+    of any matrix is), the reconstruction loss recovers it exactly, and any
+    subsequence composes into one affine map (:meth:`compose`). Its singular
+    values (:meth:`override_strength`) say how strongly that subsequence
+    overrides the history: values below 1 erase the history along a direction.
+
+    Args:
+        embedding_dim: dimension ``d`` of the point ``b`` (2 for a planar map).
+            Each event has ``d + d*d`` parameters (``v_e`` and ``M_e``).
+        readout: ``"point"`` decodes the next event from ``b`` only (the plotted
+            point); ``"full"`` also reads ``A``.
+        max_log_scale: if set, ``M_e`` entries are squashed to
+            ``(-max_log_scale, max_log_scale)``, bounding how much one event can
+            stretch or shrink the state (each step's condition number is at most
+            ``exp(2 * d * max_log_scale)``). ``None`` leaves ``M_e`` free.
+    """
+
+    geometry = "affine"
+
+    def __init__(self, num_event_types, embedding_dim=2, dropout_p=0.0,
+                 readout="point", max_log_scale=None):
+        super().__init__()
+        if readout not in ("point", "full"):
+            raise ValueError("readout must be 'point' or 'full'.")
+        d = embedding_dim
+        self.d = d
+        self.point_dim = d
+        self.embedding_dim = d + d * d        # generator: [v_e, vec(M_e)]
+        self.state_dim = d * d + d            # state: [vec(A), b]
+        self.readout = readout
+        self.max_log_scale = max_log_scale
+        self.embedding = nn.Embedding(num_event_types, self.embedding_dim)
+        self.dropout = nn.Dropout(p=dropout_p)
+        self.linear_dec = nn.Linear(d if readout == "point" else self.state_dim,
+                                    num_event_types)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        if self.linear_dec is not None:  # None when used as a ProductModel factor
+            nn.init.xavier_uniform_(self.linear_dec.weight)
+            if self.linear_dec.bias is not None:
+                nn.init.zeros_(self.linear_dec.bias)
+        d = self.d
+        with torch.no_grad():
+            nn.init.normal_(self.embedding.weight[:, :d], 0.0, 0.02)  # v_e as Euclidean
+            self.embedding.weight[:, d:].zero_()                      # M_e = 0: A_e = I
+
+    # -- group elements ----------------------------------------------------- #
+    def _maps(self, gen):
+        """(B, d + d*d) generators -> (A_e (B, d, d), v_e (B, d))."""
+        d = self.d
+        v, m = gen[:, :d], gen[:, d:].reshape(-1, d, d)
+        if self.max_log_scale is not None:
+            c = self.max_log_scale
+            m = c * torch.tanh(m / c)
+        return _matrix_exp(m), v
+
+    def _split(self, h):
+        d = self.d
+        return h[:, : d * d].reshape(-1, d, d), h[:, d * d:]
+
+    @staticmethod
+    def _join(a, b):
+        return torch.cat([a.reshape(a.shape[0], -1), b], dim=-1)
+
+    def zero_state(self, batch, device):
+        a = torch.eye(self.d, device=device).expand(batch, -1, -1)
+        return self._join(a, torch.zeros(batch, self.d, device=device))
+
+    def point(self, h):
+        """The plotted point ``b`` of a state (or of ``transform``'s output)."""
+        return h[..., self.d * self.d:]
+
+    def to_tangent(self, h):
+        return self.point(h) if self.readout == "point" else h
+
+    # -- recurrence ---------------------------------------------------------- #
+    def encoder(self, x, h):
+        a_e, v_e = self._maps(self.dropout(self.embedding(x)))
+        a_old, b_old = self._split(h)
+        a_new = torch.bmm(a_e, a_old)
+        b_new = torch.bmm(a_e, b_old.unsqueeze(-1)).squeeze(-1) + v_e
+        return self._join(a_new, b_new), self._join(a_e, v_e)
+
+    def decoder(self, h):
+        if self.linear_dec is None:
+            raise RuntimeError(
+                "this model is a ProductModel factor; decode through the "
+                "product's shared decoder, not the factor's")
+        return self.linear_dec(self.to_tangent(h))
+
+    def forward(self, x, h=None):
+        if h is None:
+            h = self.zero_state(x.shape[0], x.device)
+        h_next, e = self.encoder(x, h)
+        return self.decoder(h_next), h_next, e
+
+    def recover_increment(self, h_old, h_new):
+        """g_e = g_new . g_old^-1:  A_e = A_new A_old^-1,  v_e = b_new - A_e b_old."""
+        a_old, b_old = self._split(h_old)
+        a_new, b_new = self._split(h_new)
+        # A_e A_old = A_new  <=>  A_old^T A_e^T = A_new^T (solve, don't invert)
+        a_e = _solve(a_old.transpose(1, 2), a_new.transpose(1, 2)).transpose(1, 2)
+        v_e = b_new - torch.bmm(a_e, b_old.unsqueeze(-1)).squeeze(-1)
+        return self._join(a_e, v_e)
+
+    def dist2(self, a, b):
+        return ((a - b) ** 2).sum(-1, keepdim=True)            # Frobenius^2 on [A, b]
+
+    # -- interpretation -------------------------------------------------------- #
+    @torch.no_grad()
+    def compose(self, event_ids):
+        """One affine map (A, v) for a whole subsequence: applying it to any state
+        equals feeding the events one by one (exact; it is a group product)."""
+        dev = self.embedding.weight.device
+        a, v = torch.eye(self.d, device=dev), torch.zeros(self.d, device=dev)
+        for i in event_ids:
+            a_e, v_e = self._maps(self.embedding.weight[int(i)].unsqueeze(0))
+            a, v = a_e[0] @ a, a_e[0] @ v + v_e[0]
+        return a, v
+
+    @torch.no_grad()
+    def override_strength(self, event_ids):
+        """Singular values of the subsequence's linear part, largest first:
+        1 = the history passes through unchanged, < 1 = erased along that
+        direction, > 1 = amplified."""
+        a, _ = self.compose(event_ids)
+        return torch.linalg.svdvals(a)
 
 
 # --------------------------------------------------------------------------- #

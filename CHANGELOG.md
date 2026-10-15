@@ -4,6 +4,30 @@ All notable changes to `event2vector` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-15
+
+### Added
+
+- `geometry="affine"` (`AffineModel`): each event is an invertible affine map
+  `x -> exp(M_e) x + v_e` applied on the left of an affine state, so an event can
+  act on the history (shrink, stretch or rotate it) instead of only adding to it.
+  With `M_e = 0`, the initialisation, the point is exactly the Euclidean sum. The
+  step is recovered exactly by the reconstruction loss, and subsequences compose
+  into one affine map:
+  - `AffineModel.point(state)` returns the plotted point `b` from a state;
+  - `AffineModel.compose(event_ids)` returns one `(A, v)` for a subsequence;
+  - `AffineModel.override_strength(event_ids)` returns the singular values of its
+    linear part.
+- Estimator options `affine_readout` (`"point"` or `"full"`) and
+  `affine_max_log_scale` (bounds how much one event can stretch or shrink the state).
+- Tests for the affine geometry (`tests/test_affine.py`).
+
+### Changed
+
+- The MPS-safe `matrix_exp` is now a shared helper used by both the `rotation` and
+  `affine` geometries, and automatic device selection falls back to the CPU for
+  `affine` as it already did for `rotation`.
+
 ## [0.3.1] - 2026-10-11
 
 ### Fixed
@@ -35,5 +59,6 @@ All notable changes to `event2vector` are documented here. The format follows
 
 Earlier releases are listed on [PyPI](https://pypi.org/project/event2vector/#history).
 
+[0.4.0]: https://pypi.org/project/event2vector/0.4.0/
 [0.3.1]: https://pypi.org/project/event2vector/0.3.1/
 [0.3.0]: https://pypi.org/project/event2vector/0.3.0/
