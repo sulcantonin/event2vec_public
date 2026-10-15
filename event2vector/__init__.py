@@ -1,4 +1,4 @@
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 from .models import EuclideanModel, HyperbolicModel, HyperbolicUtils, Event2Vec
 from .geometries import (
@@ -6,6 +6,7 @@ from .geometries import (
     StereographicModel,
     RotationModel,
     HeisenbergModel,
+    AffineModel,
     ProductModel,
 )
 from .data import generate_sequences, get_sequences
@@ -20,6 +21,7 @@ __all__ = [
     "StereographicModel",
     "RotationModel",
     "HeisenbergModel",
+    "AffineModel",
     "ProductModel",
     "generate_sequences",
     "get_sequences",

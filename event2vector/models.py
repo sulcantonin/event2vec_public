@@ -8,6 +8,7 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pad_sequence
 
 from .geometries import (
+    AffineModel,
     HeisenbergModel,
     ProductModel,
     RotationModel,
@@ -196,6 +197,8 @@ class Event2Vec:
         kappa: Optional[float] = None,
         rotation_n: int = 3,
         heisenberg_m: int = 1,
+        affine_readout: str = "point",
+        affine_max_log_scale: Optional[float] = None,
         product_kappas: Sequence[float] = (-1.0, 1.0),
         lambda_reconstruction: float = 0.2,
         lambda_consistency: float = 0.2,
@@ -232,6 +235,8 @@ class Event2Vec:
         self.kappa = kappa
         self.rotation_n = rotation_n
         self.heisenberg_m = heisenberg_m
+        self.affine_readout = affine_readout
+        self.affine_max_log_scale = affine_max_log_scale
         self.product_kappas = tuple(product_kappas)
         self.lambda_reconstruction = lambda_reconstruction
         self.lambda_consistency = lambda_consistency
@@ -249,11 +254,11 @@ class Event2Vec:
             if use_gpu and torch.cuda.is_available():
                 device = torch.device("cuda")
             elif use_gpu and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                if self.geometry == "rotation":
-                    # MPS has no matrix_exp, so every rotation step would round-trip
-                    # through the CPU; for a model this small the CPU is much faster.
+                if self.geometry in ("rotation", "affine"):
+                    # MPS has no matrix_exp, so every step would round-trip through
+                    # the CPU; for a model this small the CPU is much faster.
                     warnings.warn(
-                        "geometry='rotation' needs torch.matrix_exp, which MPS does not "
+                        f"geometry='{self.geometry}' needs torch.matrix_exp, which MPS does not "
                         "implement; using device='cpu'. Pass device='mps' to run on MPS "
                         "anyway (matrix_exp is then computed on the CPU).",
                         RuntimeWarning,
@@ -318,6 +323,14 @@ class Event2Vec:
                 m=self.heisenberg_m,
                 dropout_p=self.dropout_p,
             )
+        elif self.geometry == "affine":
+            model = AffineModel(
+                num_event_types=self.num_event_types,
+                embedding_dim=self.embedding_dim,
+                dropout_p=self.dropout_p,
+                readout=self.affine_readout,
+                max_log_scale=self.affine_max_log_scale,
+            )
         elif self.geometry == "product":
             factors = [
                 StereographicModel(
@@ -332,7 +345,7 @@ class Event2Vec:
         else:
             raise ValueError(
                 "geometry must be one of: 'euclidean', 'hyperbolic', 'spherical', "
-                "'stereographic', 'rotation', 'heisenberg', 'product'."
+                "'stereographic', 'rotation', 'heisenberg', 'affine', 'product'."
             )
         return model.to(self.device)
 

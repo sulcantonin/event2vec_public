@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use event2vector, please cite the paper below."
+title: "event2vector: geometric embeddings for event sequences"
+type: software
+authors:
+  - family-names: Sulc
+    given-names: Antonin
+version: 0.4.0
+date-released: 2026-10-15
+license: MIT
+repository-code: "https://github.com/sulcantonin/event2vec_public"
+url: "https://event2vec.com"
+keywords:
+  - sequence-embedding
+  - event-sequences
+  - representation-learning
+  - geometric deep learning
+preferred-citation:
+  type: article
+  title: "Event2Vec: A Geometric Approach to Learning Composable Representations of Event Sequences"
+  authors:
+    - family-names: Sulc
+      given-names: Antonin
+  journal: "arXiv preprint arXiv:2509.12188"
+  year: 2025
+  url: "https://arxiv.org/abs/2509.12188"
