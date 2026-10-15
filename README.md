@@ -3,7 +3,7 @@
 # Event2Vector (event2vec)
 ## A Geometric Approach to Learning Composable Representations of Event Sequences
 
-[![PyPI version](https://badge.fury.io/py/event2vector.svg)](https://badge.fury.io/py/event2vector)
+[![PyPI version](https://badge.fury.io/py/event2vector.svg)](https://badge.fury.io/py/event2vector) [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23399003.svg)](https://doi.org/10.5281/zenodo.23399003)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.6+](https://img.shields.io/badge/python-3.6+-blue.svg)](https://www.python.org/downloads/)
 [![arXiv](https://img.shields.io/badge/arXiv-2509.12188-b31b1b.svg)](https://arxiv.org/abs/2509.12188)
@@ -225,3 +225,7 @@ For citations please use following Bibtex.
   year={2025}
 }
 ```
+
+To cite the software itself, use its Zenodo DOI,
+[10.5281/zenodo.23399003](https://doi.org/10.5281/zenodo.23399003) (always the
+latest version; each release also has its own DOI on the Zenodo page).
