@@ -56,7 +56,9 @@ class EuclideanModel(nn.Module):
         e = self.dropout(self.embedding(x))
         h_next = e + h
 
-        if clipping:
+        # max_norm=None (or inf) disables clipping, keeping h_t an exact sum; an
+        # infinite coefficient would otherwise turn the gradient into 0 * inf = NaN.
+        if clipping and self.max_norm is not None and self.max_norm != float("inf"):
             norm = torch.norm(h_next, p=2, dim=1, keepdim=True)
             clip_coef = self.max_norm / (norm + 1e-6)
             clip_coef = torch.min(clip_coef, torch.ones_like(clip_coef))
@@ -69,8 +71,7 @@ class EuclideanModel(nn.Module):
 
     def forward(self, x, h=None):
         # Returns (logits, next_state, increment). `increment` is the vector
-        # actually added at this step (post-dropout), i.e. the quantity the
-        # reconstruction loss must be able to invert.
+        # actually added at this step (post-dropout).
         h, e = self.encoder(x, h)
         return self.decoder(h), h, e
 
@@ -179,6 +180,22 @@ class HyperbolicModel(nn.Module):
 SequenceType = Union[torch.Tensor, Sequence[int]]
 
 
+def _nonnegative_lstsq(A, b):
+    """``argmin_{x >= 0} ||A x - b||``.
+
+    The active-set NNLS returns a sparse minimizer, which is what decoding event
+    counts needs when ``A`` has more columns than rows. Its default iteration cap
+    (3x the columns) is too small for some embeddings, so it gets a larger one and,
+    if that still fails, falls back to bounded-variable least squares.
+    """
+    from scipy.optimize import lsq_linear, nnls
+
+    try:
+        return nnls(A, b, maxiter=50 * A.shape[1])[0]
+    except RuntimeError:
+        return lsq_linear(A, b, bounds=(0.0, np.inf), method="bvls").x
+
+
 class Event2Vec:
     """
     High-level estimator that follows the fit/transform conventions of scikit-learn
@@ -202,6 +219,7 @@ class Event2Vec:
         product_kappas: Sequence[float] = (-1.0, 1.0),
         lambda_reconstruction: float = 0.2,
         lambda_consistency: float = 0.2,
+        lambda_difference: float = 0.0,
         learning_rate: float = 1e-3,
         batch_size: int = 32,
         num_epochs: int = 50,
@@ -240,6 +258,7 @@ class Event2Vec:
         self.product_kappas = tuple(product_kappas)
         self.lambda_reconstruction = lambda_reconstruction
         self.lambda_consistency = lambda_consistency
+        self.lambda_difference = lambda_difference
         self.learning_rate = learning_rate
         self.batch_size = batch_size
         self.num_epochs = num_epochs
@@ -582,6 +601,186 @@ class Event2Vec:
             values, indices = torch.topk(sims, k=k)
         return [(idx.item(), float(val)) for idx, val in zip(indices, values)]
 
+    # ------------------------------------------------------------------ #
+    # Root-cause analysis
+    #
+    # For the Euclidean geometry the state is a (clip-weighted) sum of event
+    # embeddings and the decoder is linear, so every quantity below is an exact
+    # decomposition of the model's own logits. For the other geometries the
+    # generic methods fall back to re-encoding (leave-one-out / forward passes),
+    # which is exact for the model but not additive. All of them explain the
+    # model's predictions; they are associations learned from data, not causal
+    # effects.
+    # ------------------------------------------------------------------ #
+    def _as_ids(self, sequence: SequenceType) -> List[int]:
+        if isinstance(sequence, torch.Tensor):
+            sequence = sequence.tolist()
+        return [int(i) for i in sequence]
+
+    def _next_logits(self, sequence: SequenceType) -> torch.Tensor:
+        """Decoder logits for the event following ``sequence`` (dropout off)."""
+        ids = self._as_ids(sequence)
+        was_training = self.model.training
+        self.model.eval()
+        with torch.no_grad():
+            h = self.model.zero_state(1, self.device)
+            logits = self.model.decoder(h)
+            for i in ids:
+                logits, h, _ = self.model(torch.tensor([i], device=self.device), h)
+        if was_training:
+            self.model.train()
+        return logits[0]
+
+    def _clip_weights(self, ids: List[int]) -> torch.Tensor:
+        """Euclidean weights ``w_i`` with ``h_T = sum_i w_i e_{s_i}`` exactly.
+
+        Step ``k`` scales ``h_{k-1} + e_k`` by ``gamma_k = min(1, max_norm / ||.||)``,
+        so ``w_i = prod_{k >= i} gamma_k``; all ones when clipping never fires.
+        """
+        E = self.model.embedding.weight.detach()
+        max_norm = self.model.max_norm
+        h = torch.zeros(E.shape[1], device=E.device)
+        gammas = []
+        for i in ids:
+            v = h + E[i]
+            gamma = 1.0
+            if max_norm is not None and max_norm != float("inf"):
+                gamma = min(1.0, max_norm / (v.norm().item() + 1e-6))
+            gammas.append(gamma)
+            h = v * gamma
+        g = torch.tensor(gammas, device=E.device)
+        return torch.flip(torch.cumprod(torch.flip(g, [0]), 0), [0])
+
+    def _require_euclidean(self, method: str):
+        if self.geometry != "euclidean":
+            raise NotImplementedError(
+                f"{method} needs the state to be a sum of event embeddings, which only "
+                "holds for geometry='euclidean'."
+            )
+
+    def attribute(self, sequence: SequenceType, target: Optional[int] = None) -> dict:
+        """Contribution of each event in ``sequence`` to the logit of the next event ``target``.
+
+        ``target`` defaults to the most likely next event. Euclidean: the logit is
+        decomposed exactly, ``logit = bias + sum_i contributions[i]`` with
+        ``contributions[i] = weights[i] * (W_dec e_{s_i})[target]``, where ``weights``
+        are the norm-clipping weights (all ones with ``max_norm=None``), so recent
+        events weigh more when clipping fires. Other geometries: leave-one-out,
+        ``contributions[i] = logit(sequence) - logit(sequence without position i)``,
+        which does not sum to the logit.
+
+        Returns a dict with ``target``, ``logit``, ``contributions`` (one per
+        position), ``weights`` (Euclidean only, else ``None``), ``bias`` and
+        ``exact`` (whether the contributions sum to ``logit - bias``).
+        """
+        self._check_is_fitted()
+        ids = self._as_ids(sequence)
+        if not ids:
+            raise ValueError("sequence must be non-empty.")
+        logits = self._next_logits(ids)
+        if target is None:
+            target = int(logits.argmax())
+        logit = float(logits[target])
+        if self.geometry == "euclidean":
+            E = self.model.embedding.weight.detach()
+            W = self.model.linear_dec.weight.detach()
+            b = self.model.linear_dec.bias.detach()
+            weights = self._clip_weights(ids)
+            contributions = weights * (E[ids] @ W[target])
+            return {
+                "target": target,
+                "logit": logit,
+                "contributions": contributions.cpu().numpy(),
+                "weights": weights.cpu().numpy(),
+                "bias": float(b[target]) if b is not None else 0.0,
+                "exact": True,
+            }
+        contributions = np.array([
+            logit - float(self._next_logits(ids[:i] + ids[i + 1:])[target])
+            for i in range(len(ids))
+        ])
+        return {"target": target, "logit": logit, "contributions": contributions,
+                "weights": None, "bias": None, "exact": False}
+
+    def counterfactual(self, sequence: SequenceType, remove: Union[int, Sequence[int]]) -> dict:
+        """Next-event distribution with and without the events at positions ``remove``.
+
+        Re-encodes the edited sequence, so it is exact for every geometry. Returns
+        ``probs`` (factual), ``probs_counterfactual`` and ``delta`` (their
+        difference), each of length ``num_event_types``.
+        """
+        self._check_is_fitted()
+        ids = self._as_ids(sequence)
+        drop = {remove} if isinstance(remove, int) else set(remove)
+        kept = [i for p, i in enumerate(ids) if p not in drop]
+        p = torch.softmax(self._next_logits(ids), dim=0).cpu().numpy()
+        q = torch.softmax(self._next_logits(kept), dim=0).cpu().numpy()
+        return {"probs": p, "probs_counterfactual": q, "delta": q - p}
+
+    def influence_matrix(self) -> np.ndarray:
+        """``A[j, i]``: change in the logit of next event ``j`` caused by event ``i``
+        alone, ``A[j, i] = logit_j([i]) - logit_j([])``.
+
+        Euclidean without clipping this is exactly ``W_dec E^T``, and every
+        sequence's logits are ``bias + sum_i count_i A[:, i]``; with clipping it is
+        the single-event effect. Shape ``(num_event_types, num_event_types)``.
+        """
+        self._check_is_fitted()
+        base = self._next_logits([])
+        cols = [self._next_logits([i]) - base for i in range(self.num_event_types)]
+        return torch.stack(cols, dim=1).cpu().numpy()
+
+    def event_impact(self) -> np.ndarray:
+        """How strongly one occurrence of each event moves the next-event
+        distribution: the norm of its centered influence column
+        ``||A[:, i] - mean(A[:, i])||`` (centering removes the softmax-invariant
+        shift). Shape ``(num_event_types,)``.
+        """
+        A = self.influence_matrix()
+        return np.linalg.norm(A - A.mean(axis=0, keepdims=True), axis=0)
+
+    def decompose(self, item: Union[SequenceType, torch.Tensor], round_counts: bool = False) -> np.ndarray:
+        """Recover event counts from a Euclidean state by non-negative least squares,
+        ``min_{x >= 0} ||E^T x - h||``.
+
+        ``item`` is a sequence (encoded first) or a state vector. Without clipping
+        the true counts are the unique solution whenever the history is short
+        enough relative to the coherence of the embeddings; with clipping the
+        result estimates the clip-weighted counts. ``round_counts`` rounds to
+        integers. Shape ``(num_event_types,)``.
+        """
+        self._check_is_fitted()
+        self._require_euclidean("decompose")
+        h = self._state_of(item)
+        E = self.model.embedding.weight.detach().cpu().double().numpy()
+        x = _nonnegative_lstsq(E.T, h)
+        return np.round(x) if round_counts else x
+
+    def explain_difference(self, sequence_a: SequenceType, sequence_b: SequenceType,
+                           round_counts: bool = False) -> np.ndarray:
+        """Which events differ between two histories, read from their states alone.
+
+        Decodes ``h_a - h_b`` into signed counts (positive: more in ``a``) by
+        non-negative least squares on ``[E^T, -E^T]``. Without clipping
+        ``h_a - h_b = E^T (c_a - c_b)`` exactly, so a failing run can be compared
+        with a healthy one. Shape ``(num_event_types,)``.
+        """
+        self._check_is_fitted()
+        self._require_euclidean("explain_difference")
+        d = self._state_of(sequence_a) - self._state_of(sequence_b)
+        E = self.model.embedding.weight.detach().cpu().double().numpy()
+        x = _nonnegative_lstsq(np.concatenate([E.T, -E.T], axis=1), d)
+        diff = x[: self.num_event_types] - x[self.num_event_types:]
+        return np.round(diff) if round_counts else diff
+
+    def _state_of(self, item) -> np.ndarray:
+        if isinstance(item, torch.Tensor) and item.dtype.is_floating_point:
+            return item.detach().cpu().double().numpy()
+        if isinstance(item, np.ndarray) and np.issubdtype(item.dtype, np.floating):
+            return item.astype(np.float64)
+        ids = self._as_ids(item)
+        return self.transform([ids], as_numpy=True)[0].astype(np.float64)
+
     def _standardize_sequences(
         self, sequences: Iterable[SequenceType]
     ) -> List[torch.Tensor]:
@@ -598,12 +797,74 @@ class Event2Vec:
             raise ValueError("At least one sequence is required.")
         return processed
 
-    def _compute_losses(self, y1, h1, e_curr1, h_old, target, h2):
+    def _history_reconstruction_loss(self, counts):
+        """Euclidean event-history reconstruction ``||alpha* E E^T c / n - c / n||^2``.
+
+        ``counts`` is a ``(B, V)`` histogram of the events in each row's history
+        and ``n`` its length. The history embedding ``h = E^T c / n`` is rebuilt
+        from the counts (no dropout, no clipping, not detached) and decoded with
+        the same embedding matrix, so the gradient reaches ``E`` through both the
+        encoder and the decoder. Rows with an empty history are excluded; the
+        result is the mean over the remaining rows.
+
+        ``alpha* = <E E^T c, c> / ||E E^T c||^2`` is the closed-form best scale
+        per row (no trainable parameter). It makes the loss invariant to the scale
+        of ``E``, so it scores only how well the embedding preserves the histogram
+        and does not pin the embedding norm (``||c||^2 sin^2`` of the angle between
+        ``E E^T c`` and ``c``).
+        """
+        n = counts.sum(dim=1, keepdim=True)
+        valid = n.squeeze(1) > 0
+        if not torch.any(valid):
+            return counts.new_zeros(())
+        c = counts[valid] / n[valid]
+        E = self.model.embedding.weight
+        c_hat = (c @ E) @ E.t()
+        alpha = (c_hat * c).sum(dim=1, keepdim=True) / (
+            c_hat.pow(2).sum(dim=1, keepdim=True).clamp_min(1e-12)
+        )
+        return (alpha * c_hat - c).pow(2).sum(dim=1).mean()
+
+    def _difference_reconstruction_loss(self, counts):
+        """Euclidean difference reconstruction, the same scale-invariant form as
+        ``_history_reconstruction_loss`` applied to differences of histories.
+
+        ``counts`` is a ``(B, V)`` batch of histograms. Each row is paired with
+        another row of the batch (a random cyclic shift), both normalized by
+        their length, and the unit-normalized difference ``d`` must decode to
+        itself: ``min_alpha ||alpha E E^T d - d||^2``, which equals the squared
+        sine of the angle between ``E E^T d`` and ``d``. Pairs with identical
+        histograms are skipped. This trains ``h_a - h_b`` to be decodable into
+        the events that differ, which the history term alone does not.
+        """
+        n = counts.sum(dim=1, keepdim=True)
+        valid = n.squeeze(1) > 0
+        if valid.sum() < 2:
+            return counts.new_zeros(())
+        c = counts[valid] / n[valid]
+        shift = int(torch.randint(1, c.shape[0], (1,)).item())
+        d = c - torch.roll(c, shifts=shift, dims=0)
+        norm = d.norm(dim=1, keepdim=True)
+        keep = norm.squeeze(1) > 1e-8
+        if not torch.any(keep):
+            return counts.new_zeros(())
+        d = d[keep] / norm[keep]
+        E = self.model.embedding.weight
+        d_hat = (d @ E) @ E.t()
+        alpha = (d_hat * d).sum(dim=1, keepdim=True) / (
+            d_hat.pow(2).sum(dim=1, keepdim=True).clamp_min(1e-12)
+        )
+        return (alpha * d_hat - d).pow(2).sum(dim=1).mean()
+
+    def _compute_losses(self, y1, h1, e_curr1, h_old, target, h2, counts=None):
         """Per-step prediction / reconstruction / consistency losses.
 
-        Reconstruction enforces invertibility of the update:
-        - Euclidean: subtracting the increment recovers the previous state,
-          ``(h_t - e_t) == h_{t-1}`` (exact when norm clipping does not fire).
+        Reconstruction:
+        - Euclidean: reconstructs the normalized event histogram ``counts`` of
+          the history from its additive embedding with the tied decoder ``E``
+          (see ``_history_reconstruction_loss``). The previous
+          ``(h_t - e_t) == h_{t-1}`` form was identically zero by construction
+          of ``h_t = h_{t-1} + e_t`` (non-zero only when norm clipping fired).
         - Hyperbolic: the gyrogroup *left-cancellation* law recovers the
           increment exactly, ``(-h_{t-1}) ⊕_c h_t == e_t``. (The previous
           ``(h_t ⊕_c -e_t)`` form is a right-cancellation and carries a
@@ -612,8 +873,7 @@ class Event2Vec:
         """
         prediction_loss = self.ce_loss(y1, target)
         if self.geometry == "euclidean":
-            h_reconstructed = h1 - e_curr1
-            reconstruction_loss = self.mse_loss(h_reconstructed, h_old)
+            reconstruction_loss = self._history_reconstruction_loss(counts)
             consistency_loss = self.mse_loss(h1, h2)
         elif self.geometry == "hyperbolic":
             e_recovered = HyperbolicUtils.mobius_add(-h_old, h1, self.curvature)
@@ -632,6 +892,12 @@ class Event2Vec:
             reconstruction_loss = self.model.dist2(e_recovered, e_curr1).mean()
             consistency_loss = self.model.dist2(h1, h2).mean()
         return prediction_loss, reconstruction_loss, consistency_loss
+
+    def _zero_counts(self, batch):
+        """Empty event histograms for the Euclidean reconstruction loss (else None)."""
+        if self.geometry != "euclidean":
+            return None
+        return torch.zeros((batch, self.num_event_types), device=self.device)
 
     def _train_epoch(self, sequences, optimizer, use_padding: bool) -> float:
         shuffled = sequences.copy()
@@ -660,15 +926,19 @@ class Event2Vec:
                 continue
             seq = seq.to(self.device)
             h = self.model.zero_state(1, self.device)
+            counts = self._zero_counts(1)
             for t in range(seq.numel() - 1):
                 x = seq[t].unsqueeze(0)
                 target = seq[t + 1].unsqueeze(0)
                 h_old = h.detach()
                 y1, h1, e_curr1 = self.model(x, h_old)
                 _, h2, _ = self.model(x, h_old)
+                if counts is not None:
+                    # Histogram of seq[: t + 1], the events summed into h1.
+                    counts = counts + nn.functional.one_hot(x, self.num_event_types)
 
                 prediction_loss, reconstruction_loss, consistency_loss = (
-                    self._compute_losses(y1, h1, e_curr1, h_old, target, h2)
+                    self._compute_losses(y1, h1, e_curr1, h_old, target, h2, counts)
                 )
                 combined_loss = (
                     prediction_loss
@@ -700,6 +970,7 @@ class Event2Vec:
         )
 
         h = self.model.zero_state(len(sequences), self.device)
+        counts = self._zero_counts(len(sequences))
         total_loss = torch.tensor(0.0, device=self.device)
         total_transitions = 0
 
@@ -714,15 +985,29 @@ class Event2Vec:
 
             y1, h1, e_curr1 = self.model(x, h_old)
             _, h2, _ = self.model(x, h_old)
+            step_counts = None
+            if counts is not None:
+                # Only rows still inside their sequence are updated, so padding
+                # never enters a histogram.
+                counts = counts.index_add(
+                    0, idx, nn.functional.one_hot(x, self.num_event_types).to(counts.dtype)
+                )
+                step_counts = counts[idx]
 
             prediction_loss, reconstruction_loss, consistency_loss = (
-                self._compute_losses(y1, h1, e_curr1, h_old, target, h2)
+                self._compute_losses(y1, h1, e_curr1, h_old, target, h2, step_counts)
             )
             combined_loss = (
                 prediction_loss
                 + self.lambda_reconstruction * reconstruction_loss
                 + self.lambda_consistency * consistency_loss
             )
+            if self.lambda_difference > 0 and step_counts is not None:
+                # Differences need at least two histories, which only the padded
+                # loop (several sequences per step) provides.
+                combined_loss = combined_loss + self.lambda_difference * (
+                    self._difference_reconstruction_loss(step_counts)
+                )
             step_transitions = idx.numel()
             total_loss = total_loss + combined_loss * step_transitions
             total_transitions += step_transitions

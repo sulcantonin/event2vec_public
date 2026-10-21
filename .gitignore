@@ -7,3 +7,4 @@ dist/
 *.model
 # README figures are tracked
 !images/*.png
+data/

@@ -459,3 +459,39 @@ def abelianization_gap(estimator, record, seed: int = 0, probe: str = "mlp") -> 
         "n_abelian": record["n_abelian"],
         "is_abelian": record["is_abelian"],
     }
+
+
+# --------------------------------------------------------------------------- #
+# Root-cause analysis — does the influence matrix expose the generating graph?
+# --------------------------------------------------------------------------- #
+def transition_graph_auc(estimator, graph: dict, vocab: dict, influence=None) -> dict:
+    """Score the estimator's influence matrix against a known transition graph.
+
+    ``graph`` maps an event name to its successors, ``{name: [(next, prob), ...]}``
+    (as in ``make_lifepath()["graph"]``) and ``vocab`` maps names to event ids.
+    Every ordered pair ``i != j`` is a candidate edge ``i -> j`` scored by
+    ``A[j, i]`` from ``estimator.influence_matrix()`` (or the given ``influence``);
+    the true edges are the positives.
+
+    Returns ``auc`` (ROC AUC), ``average_precision``, ``n_edges`` and
+    ``n_pairs``. 0.5 AUC is chance.
+    """
+    from sklearn.metrics import average_precision_score, roc_auc_score
+
+    A = estimator.influence_matrix() if influence is None else np.asarray(influence)
+    V = A.shape[0]
+    truth = np.zeros((V, V), dtype=bool)  # truth[j, i]: edge i -> j
+    for src, succ in graph.items():
+        if src not in vocab:
+            continue
+        for dst, _ in succ:
+            if dst in vocab:
+                truth[vocab[dst], vocab[src]] = True
+    off = ~np.eye(V, dtype=bool)
+    y, s = truth[off], A[off]
+    return {
+        "auc": float(roc_auc_score(y, s)),
+        "average_precision": float(average_precision_score(y, s)),
+        "n_edges": int(y.sum()),
+        "n_pairs": int(y.size),
+    }

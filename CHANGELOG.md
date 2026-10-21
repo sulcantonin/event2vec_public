@@ -4,6 +4,48 @@ All notable changes to `event2vector` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-10-21
+
+The Euclidean model gets a reconstruction objective that acts on whole histories
+and a set of root-cause analysis methods built on the exact decomposition of its
+state. Other geometries are unchanged; the API is backward compatible.
+
+### Added
+
+- Root-cause analysis methods on `Event2Vec`: `attribute` (exact per-event
+  logit contributions for Euclidean, leave-one-out otherwise), `counterfactual`,
+  `influence_matrix`, `event_impact`, and for Euclidean `decompose` and
+  `explain_difference` (event counts recovered from states by non-negative least
+  squares).
+- `metrics.transition_graph_auc`, which scores the influence matrix against a
+  known transition graph.
+- `lambda_difference` (experimental, off by default): a difference-reconstruction
+  term for the Euclidean model. Random pairs of histories in a padded batch must
+  have a state difference that decodes (with the same scale-invariant form) to
+  the events that differ. In our experiments it lowers the reconstruction error
+  and improves the decoding of sums, but does not improve the decoding of
+  differences; it is kept as an option for further work.
+- `max_norm=None` disables the Euclidean norm clipping, so the state is the exact
+  sum of its events.
+
+### Changed
+
+- The Euclidean reconstruction loss is upgraded to a history-level objective.
+  It reconstructs the normalized event histogram `c/n` of each history from its
+  additive embedding `Eᵀ c/n`, with the event-embedding matrix as a tied decoder:
+  `‖α* E Eᵀ c/n − c/n‖²`, where `α* = ⟨E Eᵀ c, c⟩ / ‖E Eᵀ c‖²` is the
+  closed-form best scale (no trainable parameter), so the loss does not compete
+  with prediction for the embedding norm. The embedding is rebuilt without dropout
+  or clipping so the gradient reaches `E`. The previous step-level term
+  `‖(h_t − e_t) − h_{t-1}‖²` is satisfied by construction of the additive update
+  (it acted only when `max_norm` clipping fired). The other geometries are
+  unchanged.
+
+### Fixed
+
+- An infinite `max_norm` previously produced NaN gradients (`0 · inf` in the
+  backward pass of the clip).
+
 ## [0.4.1] - 2026-10-15
 
 Documentation and metadata only; the code is unchanged from 0.4.0.

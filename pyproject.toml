@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "event2vector"
-version = "0.4.1"
+version = "0.5.0"
 description = "Scikit-learn-style geometric embeddings for event sequences."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -34,6 +34,7 @@ dependencies = [
   "numpy>=1.21",
   "torch>=1.13",
   "scikit-learn>=1.0",
+  "scipy>=1.5",
   "tqdm>=4.0"
 ]
 

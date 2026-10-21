@@ -96,7 +96,7 @@ step:
 | term | weight | what it enforces |
 |---|---|---|
 | next-event prediction | 1 | a linear decoder predicts event `t+1` from `h_t` (cross-entropy) |
-| reconstruction | `lambda_reconstruction` | the step `e_t` can be recovered from `h_{t-1}` and `h_t`, so the update stays invertible |
+| reconstruction | `lambda_reconstruction` | Euclidean: the history's event counts can be read back from its embedding with the tied decoder `E`, `‖α* E Eᵀ c/n − c/n‖²` with the closed-form best scale `α*`, so it does not fix the embedding norm; other geometries: the step `e_t` is recovered from `h_{t-1}` and `h_t` |
 | consistency | `lambda_consistency` | two dropout passes over the same step agree |
 
 There is no attention and no hidden nonlinearity in the state update, which is
@@ -106,7 +106,7 @@ what keeps every embedding a readable composition of its events. See the
 ## Geometries
 
 Choose the composition with `geometry=`. Every geometry uses the same estimator
-and a generic left-cancellation reconstruction loss.
+and, apart from `euclidean`, a generic left-cancellation reconstruction loss.
 
 | `geometry` | update | best for |
 |---|---|---|
@@ -195,9 +195,10 @@ the state.
 | `affine_max_log_scale` | `None` | bound on how much one event can stretch the `affine` state |
 | `product_kappas` | `(-1.0, 1.0)` | one curvature per factor for `product` |
 | `dropout_p` | `0.2` | dropout on each step's increment |
-| `max_norm` | `10.0` | norm clipping of the Euclidean state |
+| `max_norm` | `10.0` | norm clipping of the Euclidean state; `None` disables it, so the state is the exact sum of its events |
 | `lambda_reconstruction` | `0.2` | weight of the reconstruction loss |
 | `lambda_consistency` | `0.2` | weight of the consistency loss |
+| `lambda_difference` | `0.0` | weight of the difference-reconstruction loss (Euclidean, needs `pad_sequences=True`): the difference of two histories' states must decode to the events that differ |
 | `learning_rate` | `1e-3` | AdamW learning rate |
 | `batch_size` | `32` | sequences per batch |
 | `num_epochs` | `50` | training epochs |
@@ -215,9 +216,51 @@ the state.
 | `transform(sequences, as_numpy=True)` | one state per sequence (NumPy array or tensor) |
 | `fit_transform(sequences, ...)` | `fit`, then `transform` on the same sequences |
 | `most_similar(positive, negative=None, topn=10)` | nearest event ids to events or whole sequences, with similarities |
+| `attribute(sequence, target=None)` | each event's contribution to the logit of the next event `target` |
+| `counterfactual(sequence, remove)` | next-event probabilities with and without the events at positions `remove` |
+| `influence_matrix()` | `A[j, i]`: how much event `i` alone raises the logit of next event `j` |
+| `event_impact()` | how strongly one occurrence of each event moves the next-event distribution |
+| `decompose(sequence_or_state)` | event counts recovered from a state vector (Euclidean) |
+| `explain_difference(sequence_a, sequence_b)` | signed counts of the events that differ, read from the two states (Euclidean) |
 
 The underlying PyTorch module is `model.model` (event vectors in
 `model.model.embedding.weight`).
+
+### Root-cause analysis
+
+In the Euclidean geometry the state is an exact weighted sum of the event
+embeddings, `h_T = Σ_i w_i e_{s_i}`, and the decoder is linear. The weights `w_i`
+are the products of the later norm-clipping factors (all `1` with
+`max_norm=None`), so recent events weigh more once clipping fires. Each prediction
+therefore splits exactly into per-event terms, which the methods above expose:
+
+```python
+est = Event2Vec(num_event_types=len(vocab), pad_sequences=True).fit(sequences)
+
+out = est.attribute(history, target=vocab["job_loss"])
+out["bias"] + out["contributions"].sum()   # equals out["logit"]: one term per event
+
+est.counterfactual(history, remove=[2])["delta"]   # change in next-event probabilities
+A = est.influence_matrix()                         # (V, V) event -> next-event influence
+est.event_impact()                                 # one score per event
+est.decompose(history, round_counts=True)          # which events a state contains
+est.explain_difference(failing_run, healthy_run)   # +: more in the failing run
+```
+
+| method | geometries | exact when |
+|---|---|---|
+| `attribute` | all | Euclidean: always (the terms sum to the logit). Others: leave-one-out differences, which do not sum to the logit |
+| `counterfactual` | all | always (the edited sequence is re-encoded) |
+| `influence_matrix`, `event_impact` | all | Euclidean with `max_norm=None`: `A = W_dec Eᵀ` and every sequence's logits are `bias + A @ counts` |
+| `decompose`, `explain_difference` | Euclidean | `max_norm=None` and few enough distinct events for the embeddings to separate them; with clipping they estimate the clip-weighted counts |
+
+`event2vector.metrics.transition_graph_auc(est, graph, vocab)` scores
+`influence_matrix()` against a known transition graph (ROC AUC over all ordered
+event pairs), e.g. `make_lifepath()["graph"]`.
+
+These methods explain the model's predictions. They reflect associations learned
+from the data, not causal effects, and the sum-based ones cannot tell event
+orders apart when clipping does not fire.
 
 ### Devices
 
