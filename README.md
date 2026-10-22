@@ -16,7 +16,7 @@
 [![PMLR](https://img.shields.io/badge/PMLR-vol.%20282-1f4e79.svg)](https://proceedings.mlr.press/v282/sulc26a.html)
 [![arXiv](https://img.shields.io/badge/arXiv-2509.12188-b31b1b.svg)](https://arxiv.org/abs/2509.12188)
 
-**[event2vec.com](https://event2vec.com)** · [Paper](https://proceedings.mlr.press/v282/sulc26a.html) · [Changelog](https://github.com/sulcantonin/event2vec_public/blob/main/CHANGELOG.md) · [Issues](https://github.com/sulcantonin/event2vec_public/issues)
+**[event2vec.com](https://event2vec.com)** · [Visual guide](https://github.com/sulcantonin/event2vec_public/blob/main/docs/visual-guide.md) · [Paper](https://proceedings.mlr.press/v282/sulc26a.html) · [Changelog](https://github.com/sulcantonin/event2vec_public/blob/main/CHANGELOG.md) · [Issues](https://github.com/sulcantonin/event2vec_public/issues)
 
 ![Event2Vector teaser](https://raw.githubusercontent.com/sulcantonin/event2vec_public/main/images/teaser.png)
 
@@ -36,6 +36,9 @@ events' vectors. This makes the representation interpretable by construction:
 Other geometries (hyperbolic, spherical, rotation, Heisenberg, affine, product)
 keep this compositional structure while capturing hierarchy, cycles or order. All
 of them sit behind one scikit-learn-style estimator.
+
+The [visual guide](https://github.com/sulcantonin/event2vec_public/blob/main/docs/visual-guide.md) walks through all of this picture by picture: histories
+as sums, prediction, exact explanations, counterfactuals, gates and geometries.
 
 ## Installation
 
@@ -98,6 +101,11 @@ step:
 | next-event prediction | 1 | a linear decoder predicts event `t+1` from `h_t` (cross-entropy) |
 | reconstruction | `lambda_reconstruction` | the step `e_t` can be recovered from `h_{t-1}` and `h_t`, so the update stays invertible |
 | consistency | `lambda_consistency` | two dropout passes over the same step agree |
+
+With `gate="vector"` (Euclidean only), each event may also rescale the history
+before its vector is added, `h_t = (1 + g_e) * h_{t-1} + e_t`. The gate starts at
+zero, so training starts from the exact sum, and the reconstruction term becomes
+`‖g_e * h_{t-1}‖²`: the price the model pays for departing from pure addition.
 
 There is no attention and no hidden nonlinearity in the state update, which is
 what keeps every embedding a readable composition of its events. See the
@@ -196,6 +204,7 @@ the state.
 | `product_kappas` | `(-1.0, 1.0)` | one curvature per factor for `product` |
 | `dropout_p` | `0.2` | dropout on each step's increment |
 | `max_norm` | `10.0` | norm clipping of the Euclidean state |
+| `gate` | `None` | Euclidean only: `"vector"` or `"tied"` lets each event rescale the history, `h_t = (1 + g_e) * h_{t-1} + e_t` |
 | `lambda_reconstruction` | `0.2` | weight of the reconstruction loss |
 | `lambda_consistency` | `0.2` | weight of the consistency loss |
 | `learning_rate` | `1e-3` | AdamW learning rate |
@@ -215,9 +224,34 @@ the state.
 | `transform(sequences, as_numpy=True)` | one state per sequence (NumPy array or tensor) |
 | `fit_transform(sequences, ...)` | `fit`, then `transform` on the same sequences |
 | `most_similar(positive, negative=None, topn=10)` | nearest event ids to events or whole sequences, with similarities |
+| `attribute(sequence, target=None)` | each earlier event's contribution to the logit of `target`, per position and per event id; exact for Euclidean |
+| `rank_causes(history, effect)` | the distinct events of `history` ranked by their contribution to `effect` |
+| `counterfactual(sequence, remove=, replace=, insert=)` | next-event distribution before and after editing the history |
+| `event_gates()` | the learned gate of every event (needs `gate`) |
 
 The underlying PyTorch module is `model.model` (event vectors in
 `model.model.embedding.weight`).
+
+### Explaining predictions
+
+```python
+import numpy as np
+from event2vector import Event2Vec
+
+sequences = [[0, 3, 7, 5], [3, 1, 7, 5], [0, 1, 2, 4], [3, 7, 2, 5]] * 50
+model = Event2Vec(num_event_types=8, gate="vector", pad_sequences=True,
+                  num_epochs=20).fit(sequences)
+
+history, effect = [3, 7, 1, 7], 5
+model.rank_causes(history, effect)     # [(event_id, score), ...], highest first
+out = model.attribute(history, target=effect)
+np.isclose(out["baseline"] + out["contributions"].sum(), out["logit"])  # True
+model.counterfactual(history, remove=[1])["delta"][effect]  # change in P(effect)
+model.event_gates().mean(axis=1)       # per event: < 0 shrinks the history
+```
+
+The contributions explain the model's predictions. They are associations learned
+from the data, not causal effects.
 
 ### Devices
 
@@ -280,6 +314,78 @@ pytest tests/ -q
 Changes are listed in [CHANGELOG.md](https://github.com/sulcantonin/event2vec_public/blob/main/CHANGELOG.md).
 Bug reports and questions are welcome in the
 [issue tracker](https://github.com/sulcantonin/event2vec_public/issues).
+
+## FAQ
+
+**How is Event2Vec different from Word2Vec?** Both learn one vector per event, but
+from different signals. Word2Vec learns from co-occurrence in a symmetric context
+window: two events are similar when they appear together. Event2Vec learns from
+next-event prediction: a history must predict the event that follows it, so each
+event's vector is pulled towards the events that follow it. This has three
+consequences:
+
+- Its vectors encode what comes next, not what appears together. On synthetic health
+  records (Synthea), the similarity of Event2Vec's vectors follows the similarity of
+  the events' successors (Spearman 0.79) far more than their co-occurrence (0.32);
+  for Word2Vec it is the reverse (0.30 and 0.46).
+- It represents whole histories and predicts their next event. Word2Vec has neither a
+  history state nor a predictive model.
+- Its explanations have a direction. Asked which earlier condition caused a
+  complication, Event2Vec's attribution ranks the true cause first in 84% of Synthea
+  cases and Word2Vec's similarity in 52%: a complication is more similar to other
+  complications than to the diabetes that causes them.
+
+Word2Vec is the right tool when co-occurrence is the question: on intrusion-detection
+alerts (AIT-ADS), where the relevant alerts are defined by occurring together, it
+ranks them perfectly.
+
+**How is Event2Vec different from an RNN?** It is a recurrent model too, but its
+transition is restricted to a fixed operation selected by the event: adding the
+event's vector in the Euclidean case, optionally after a per-event rescaling of the
+history (`gate`), or a group product in the other geometries. An RNN such as a GRU
+or LSTM learns a nonlinear function of the state and the input, with gates that
+depend on the state. Two things follow:
+
+- Event2Vec's state is a closed-form expression of its events, so histories compose
+  exactly and every prediction splits exactly into one term per event. An RNN can
+  only be explained after the fact, by methods that approximate this split. In our
+  comparison, Event2Vec's contributions add up to the logit within 1e-6, while
+  integrated gradients and gradient times input on GRU and LSTM models miss by 0.09
+  to 11. On Synthea, Event2Vec ranks the known cause first more often (0.84 against
+  at most 0.73 for the RNN explanations) at a similar next-event loss.
+- The restriction costs expressiveness. On the AIT-ADS alert streams, where order
+  matters more, a GRU predicts markedly better, and its integrated-gradients
+  explanations rank the attack precursors slightly better (0.95 against 0.92).
+
+So Event2Vec is the better choice when exact, per-event explanations matter, and an
+RNN when raw predictive accuracy on strongly order-dependent data does. The numbers
+come from one training run of each model.
+
+**Why does additivity hold?** In the Euclidean model, `h_t = h_{t-1} + e_t` by
+construction, so with no clipping the state is exactly the sum of its event vectors
+and `h(A followed by B) = h(A) + h(B)`. Additivity is a property of the
+architecture, not something training has to discover. Training decides what the
+event vectors are, so that their sums predict what comes next. With
+`gate="vector"`, composition becomes `h(A followed by B) = G(B) * h(A) + h(B)`,
+where `G(B)` is the product of the gates `1 + g_e` of B's events. It stays exact,
+and the reconstruction term keeps the gates near zero unless the data needs them.
+
+**Why are the explanations exact?** The state is a weighted sum of event vectors,
+each scaled by the gates of the events after it and by norm clipping, and the
+decoder is linear. So a logit splits into one term per event plus the decoder
+bias, with nothing left over. Gradient-based explanations of an RNN only
+approximate this split. For the curved geometries, `attribute` uses the change in
+the logit at each step, which also sums exactly but depends on the order of events.
+
+**What does the reduced expressiveness cost?** The plain Euclidean state cannot tell
+apart two histories with the same events in a different order. Predictions still use
+order, because the model predicts after every prefix, but the final state does not.
+The gate, or a non-Euclidean geometry, restores order sensitivity.
+
+**When should I use the gate?** When some events should reset or fade the past, as
+an acute illness, a sentence boundary or a burst of repeated alerts might.
+`event_gates()` then shows which events forget. The plain sum is the default
+because it keeps every guarantee above.
 
 ## Citation
 

@@ -4,6 +4,52 @@ All notable changes to `event2vector` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-10-22
+
+The Euclidean model gains an optional per-event gate on the history, and the
+estimator gains root-cause methods that explain its next-event predictions. Both are
+opt-in: with default arguments, training is identical to 0.4.1. This release builds
+on 0.4.1; the history-reconstruction objective of 0.5.0 is not carried forward.
+
+### Added
+
+- `gate` (Euclidean, default `None`): each event can rescale the history
+  coordinate-wise before its vector is added, `h_t = (1 + g_e) * h_{t-1} + e_t`
+  with `g_e = tanh(a_e)`, so the factor `1 + g_e` stays in `(0, 2)`.
+  `gate="vector"` learns `a_e` as a second vector per event; `gate="tied"`
+  computes it from the event's own embedding, `a_e = U e`. The gate starts at zero,
+  so training starts from the exact sum. With a gate, the reconstruction term
+  `‖(h_t − e_t) − h_{t-1}‖²` equals `‖g_e * h_{t-1}‖²`: it becomes an additivity
+  penalty, and `lambda_reconstruction` sets how much the model pays to depart
+  from the pure sum.
+- `attribute(sequence, target=None)`: the contribution of each earlier event to
+  the logit of `target` (default: the predicted next event), also summed per event
+  id. Euclidean: an exact decomposition of the state into per-event vectors, scaled
+  by the gates of later events and by norm clipping, so the contributions plus the
+  decoder bias equal the logit. Other geometries: the change in the target logit at
+  each step, which also sums exactly but depends on the order of events.
+- `rank_causes(history, effect)`: the distinct events of a history ranked by
+  their contribution to `effect`.
+- `counterfactual(sequence, remove=, replace=, insert=)`: the next-event
+  distribution before and after editing the history by position; the edited history
+  is re-encoded, so it is exact for every geometry.
+- `event_gates()`: the learned gate of every event; negative coordinates shrink
+  that part of the history.
+
+These methods explain the model's predictions. They are associations learned from
+the data, not causal effects.
+
+### Documentation
+
+- A visual guide, `docs/visual-guide.md`: an illustrated walk through the library
+  (histories as sums, prediction, exact attribution, counterfactuals, gates, order,
+  geometries). Its light and dark figures are computed by the library and
+  regenerated with `docs/make_figures.py`.
+- New README teaser showing composition, attribution, gating and order dependence.
+- README parameter table, method table and an example for the gate and the
+  root-cause methods, and an FAQ on how Event2Vec differs from Word2Vec and from
+  recurrent networks.
+
 ## [0.4.1] - 2026-10-15
 
 Documentation and metadata only; the code is unchanged from 0.4.0.
