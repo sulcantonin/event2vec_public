@@ -39,6 +39,17 @@ on 0.4.1; the history-reconstruction objective of 0.5.0 is not carried forward.
 These methods explain the model's predictions. They are associations learned from
 the data, not causal effects.
 
+### Documentation
+
+- A visual guide, `docs/visual-guide.md`: an illustrated walk through the library
+  (histories as sums, prediction, exact attribution, counterfactuals, gates, order,
+  geometries). Its light and dark figures are computed by the library and
+  regenerated with `docs/make_figures.py`.
+- New README teaser showing composition, attribution, gating and order dependence.
+- README parameter table, method table and an example for the gate and the
+  root-cause methods, and an FAQ on how Event2Vec differs from Word2Vec and from
+  recurrent networks.
+
 ## [0.4.1] - 2026-10-15
 
 Documentation and metadata only; the code is unchanged from 0.4.0.
