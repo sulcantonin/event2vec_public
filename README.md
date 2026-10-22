@@ -99,6 +99,11 @@ step:
 | reconstruction | `lambda_reconstruction` | the step `e_t` can be recovered from `h_{t-1}` and `h_t`, so the update stays invertible |
 | consistency | `lambda_consistency` | two dropout passes over the same step agree |
 
+With `gate="vector"` (Euclidean only), each event may also rescale the history
+before its vector is added, `h_t = (1 + g_e) * h_{t-1} + e_t`. The gate starts at
+zero, so training starts from the exact sum, and the reconstruction term becomes
+`‖g_e * h_{t-1}‖²`: the price the model pays for departing from pure addition.
+
 There is no attention and no hidden nonlinearity in the state update, which is
 what keeps every embedding a readable composition of its events. See the
 [paper](https://proceedings.mlr.press/v282/sulc26a.html) for details.
@@ -196,6 +201,7 @@ the state.
 | `product_kappas` | `(-1.0, 1.0)` | one curvature per factor for `product` |
 | `dropout_p` | `0.2` | dropout on each step's increment |
 | `max_norm` | `10.0` | norm clipping of the Euclidean state |
+| `gate` | `None` | Euclidean only: `"vector"` or `"tied"` lets each event rescale the history, `h_t = (1 + g_e) * h_{t-1} + e_t` |
 | `lambda_reconstruction` | `0.2` | weight of the reconstruction loss |
 | `lambda_consistency` | `0.2` | weight of the consistency loss |
 | `learning_rate` | `1e-3` | AdamW learning rate |
@@ -215,9 +221,34 @@ the state.
 | `transform(sequences, as_numpy=True)` | one state per sequence (NumPy array or tensor) |
 | `fit_transform(sequences, ...)` | `fit`, then `transform` on the same sequences |
 | `most_similar(positive, negative=None, topn=10)` | nearest event ids to events or whole sequences, with similarities |
+| `attribute(sequence, target=None)` | each earlier event's contribution to the logit of `target`, per position and per event id; exact for Euclidean |
+| `rank_causes(history, effect)` | the distinct events of `history` ranked by their contribution to `effect` |
+| `counterfactual(sequence, remove=, replace=, insert=)` | next-event distribution before and after editing the history |
+| `event_gates()` | the learned gate of every event (needs `gate`) |
 
 The underlying PyTorch module is `model.model` (event vectors in
 `model.model.embedding.weight`).
+
+### Explaining predictions
+
+```python
+import numpy as np
+from event2vector import Event2Vec
+
+sequences = [[0, 3, 7, 5], [3, 1, 7, 5], [0, 1, 2, 4], [3, 7, 2, 5]] * 50
+model = Event2Vec(num_event_types=8, gate="vector", pad_sequences=True,
+                  num_epochs=20).fit(sequences)
+
+history, effect = [3, 7, 1, 7], 5
+model.rank_causes(history, effect)     # [(event_id, score), ...], highest first
+out = model.attribute(history, target=effect)
+np.isclose(out["baseline"] + out["contributions"].sum(), out["logit"])  # True
+model.counterfactual(history, remove=[1])["delta"][effect]  # change in P(effect)
+model.event_gates().mean(axis=1)       # per event: < 0 shrinks the history
+```
+
+The contributions explain the model's predictions. They are associations learned
+from the data, not causal effects.
 
 ### Devices
 
@@ -280,6 +311,46 @@ pytest tests/ -q
 Changes are listed in [CHANGELOG.md](https://github.com/sulcantonin/event2vec_public/blob/main/CHANGELOG.md).
 Bug reports and questions are welcome in the
 [issue tracker](https://github.com/sulcantonin/event2vec_public/issues).
+
+## FAQ
+
+**How is Event2Vec different from an RNN?** It is a recurrent model, but its update
+is restricted to a fixed operation chosen by the geometry: adding the event's vector
+in the Euclidean case, a group product in the others. An RNN learns a nonlinear
+function of the state and the input. That restriction costs expressiveness, and
+an RNN usually predicts the next event somewhat better. In exchange, the state is a
+closed-form expression of its events: histories compose, and every event's share
+of a prediction can be read off exactly.
+
+**Why does additivity hold?** In the Euclidean model, `h_t = h_{t-1} + e_t` by
+construction, so with no clipping the state is exactly the sum of its event vectors
+and `h(A followed by B) = h(A) + h(B)`. Additivity is a property of the
+architecture, not something training has to discover. Training decides what the
+event vectors are, so that their sums predict what comes next. With
+`gate="vector"`, composition becomes `h(A followed by B) = G(B) * h(A) + h(B)`,
+where `G(B)` is the product of the gates `1 + g_e` of B's events. It stays exact,
+and the reconstruction term keeps the gates near zero unless the data needs them.
+
+**Why are the explanations exact?** The state is a weighted sum of event vectors,
+each scaled by the gates of the events after it and by norm clipping, and the
+decoder is linear. So a logit splits into one term per event plus the decoder
+bias, with nothing left over. Gradient-based explanations of an RNN only
+approximate this split. For the curved geometries, `attribute` uses the change in
+the logit at each step, which also sums exactly but depends on the order of events.
+
+**What does the reduced expressiveness cost?** The plain Euclidean state cannot tell
+apart two histories with the same events in a different order. Predictions still use
+order, because the model predicts after every prefix, but the final state does not.
+The gate, or a non-Euclidean geometry, restores order sensitivity.
+
+**When should I use the gate?** When some events should reset or fade the past, as
+an acute illness, a sentence boundary or a burst of repeated alerts might.
+`event_gates()` then shows which events forget. The plain sum is the default
+because it keeps every guarantee above.
+
+**Why not Word2Vec?** Word2Vec learns which events appear together. Event2Vec learns
+which histories predict which next event, so its vectors and explanations have a
+direction: from earlier events to later ones.
 
 ## Citation
 

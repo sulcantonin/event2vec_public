@@ -23,18 +23,34 @@ class EuclideanModel(nn.Module):
     A recurrent model for learning event sequence representations in Euclidean space.
     The model uses a simple additive update rule, where the representation of a
     sequence is the sum of its constituent event embeddings.
+
+    With ``gate`` set, each event also rescales the history coordinate-wise
+    (a diagonal gate), ``h_t = (1 + g_e) * h_{t-1} + e_t`` with
+    ``g_e = tanh(a_e)`` in ``(-1, 1)``, so the factor ``1 + g_e`` stays in
+    ``(0, 2)``. ``gate="vector"`` learns ``a_e`` as a second vector per event;
+    ``gate="tied"`` computes it from the event's own embedding, ``a_e = U e``.
+    The gate is zero-initialized, so training starts from the exact sum, and
+    ``g_e = 0`` recovers it exactly.
     """
 
     geometry = "euclidean"
 
-    def __init__(self, num_event_types, embedding_dim, dropout_p=0.2, max_norm=10.0):
+    def __init__(self, num_event_types, embedding_dim, dropout_p=0.2, max_norm=10.0,
+                 gate=None):
         super(EuclideanModel, self).__init__()
+        if gate not in (None, "vector", "tied"):
+            raise ValueError("gate must be None, 'vector' or 'tied'.")
         self.embedding_dim = embedding_dim
         self.state_dim = embedding_dim
         self.max_norm = max_norm
+        self.gate = gate
         self.embedding = nn.Embedding(num_event_types, embedding_dim)
         self.dropout = nn.Dropout(p=dropout_p)
         self.linear_dec = nn.Linear(embedding_dim, num_event_types)
+        if gate == "vector":
+            self.gate_embedding = nn.Embedding(num_event_types, embedding_dim)
+        elif gate == "tied":
+            self.gate_linear = nn.Linear(embedding_dim, embedding_dim, bias=False)
 
     def zero_state(self, batch, device):
         return torch.zeros((batch, self.embedding_dim), device=device)
@@ -45,6 +61,18 @@ class EuclideanModel(nn.Module):
         if self.linear_dec.bias is not None:
             nn.init.zeros_(self.linear_dec.bias)
         nn.init.normal_(self.embedding.weight, mean=0.0, std=0.02)
+        # Zero gate: the model starts as the exact additive sum.
+        if self.gate == "vector":
+            nn.init.zeros_(self.gate_embedding.weight)
+        elif self.gate == "tied":
+            nn.init.zeros_(self.gate_linear.weight)
+
+    def gate_values(self, x):
+        """Diagonal gate ``g_e = tanh(a_e)`` for event ids ``x``, shape ``(len(x), D)``."""
+        if self.gate == "vector":
+            return torch.tanh(self.gate_embedding(x))
+        # tied: computed from the event's own (undropped) embedding
+        return torch.tanh(self.gate_linear(self.embedding(x)))
 
     def encoder(self, x, h=None, clipping=True):
         if h is None:
@@ -54,7 +82,11 @@ class EuclideanModel(nn.Module):
         # increments; this keeps the additive semantics and lets the two-pass
         # consistency loss still see distinct masks.
         e = self.dropout(self.embedding(x))
-        h_next = e + h
+        if self.gate is None:
+            h_next = e + h
+        else:
+            # Diagonal gate on the history: h_t = (1 + g_e) * h_{t-1} + e_t.
+            h_next = (1.0 + self.gate_values(x)) * h + e
 
         if clipping:
             norm = torch.norm(h_next, p=2, dim=1, keepdim=True)
@@ -202,6 +234,7 @@ class Event2Vec:
         product_kappas: Sequence[float] = (-1.0, 1.0),
         lambda_reconstruction: float = 0.2,
         lambda_consistency: float = 0.2,
+        gate: Optional[str] = None,
         learning_rate: float = 1e-3,
         batch_size: int = 32,
         num_epochs: int = 50,
@@ -221,6 +254,8 @@ class Event2Vec:
             raise ValueError("batch_size must be positive.")
         if num_epochs <= 0:
             raise ValueError("num_epochs must be positive.")
+        if gate is not None and geometry.lower() != "euclidean":
+            raise ValueError("gate is only implemented for geometry='euclidean'.")
         if geometry.lower() == "hyperbolic" and curvature <= 0:
             raise ValueError(
                 "curvature must be positive (c>0 corresponds to sectional curvature -c)."
@@ -240,6 +275,7 @@ class Event2Vec:
         self.product_kappas = tuple(product_kappas)
         self.lambda_reconstruction = lambda_reconstruction
         self.lambda_consistency = lambda_consistency
+        self.gate = gate
         self.learning_rate = learning_rate
         self.batch_size = batch_size
         self.num_epochs = num_epochs
@@ -285,6 +321,7 @@ class Event2Vec:
                 embedding_dim=self.embedding_dim,
                 dropout_p=self.dropout_p,
                 max_norm=self.max_norm,
+                gate=self.gate,
             )
         elif self.geometry == "hyperbolic":
             model = HyperbolicModel(
@@ -582,6 +619,172 @@ class Event2Vec:
             values, indices = torch.topk(sims, k=k)
         return [(idx.item(), float(val)) for idx, val in zip(indices, values)]
 
+    # ------------------------------------------------------------------ #
+    # Root-cause analysis
+    #
+    # These methods explain the model's own predictions: which earlier events
+    # move the logit of an event, and what changes when the history is edited.
+    # They are associations learned from data, not causal effects.
+    # ------------------------------------------------------------------ #
+    def _as_ids(self, sequence: SequenceType) -> List[int]:
+        if isinstance(sequence, torch.Tensor):
+            sequence = sequence.tolist()
+        ids = [int(i) for i in sequence]
+        for i in ids:
+            if not 0 <= i < self.num_event_types:
+                raise ValueError(f"event id {i} is outside 0..{self.num_event_types - 1}.")
+        return ids
+
+    @torch.no_grad()
+    def _logit_path(self, ids: List[int]) -> torch.Tensor:
+        """Decoder logits after each prefix of ``ids``, shape ``(len(ids) + 1, V)``;
+        row 0 is the empty history. Dropout is off."""
+        was_training = self.model.training
+        self.model.eval()
+        h = self.model.zero_state(1, self.device)
+        rows = [self.model.decoder(h)[0]]
+        for i in ids:
+            logits, h, _ = self.model(torch.tensor([i], device=self.device), h)
+            rows.append(logits[0])
+        if was_training:
+            self.model.train()
+        return torch.stack(rows)
+
+    @torch.no_grad()
+    def _euclidean_contributions(self, ids: List[int]) -> torch.Tensor:
+        """Per-position vectors ``c_i`` with ``h_T = sum_i c_i`` exactly (Euclidean).
+
+        Each step scales the earlier contributions by the event's gate
+        ``1 + g_e`` (when a gate is set), adds the new embedding, and scales
+        everything by the norm-clipping coefficient when clipping fires.
+        """
+        m = self.model
+        E = m.embedding.weight
+        C = torch.zeros((0, E.shape[1]), device=E.device)
+        for i in ids:
+            x = torch.tensor([i], device=E.device)
+            if m.gate is not None:
+                C = C * (1.0 + m.gate_values(x))
+            C = torch.cat([C, E[i].unsqueeze(0)])
+            norm = C.sum(dim=0).norm()
+            C = C * min(1.0, float(m.max_norm / (norm + 1e-6)))
+        return C
+
+    def attribute(self, sequence: SequenceType, target: Optional[int] = None) -> dict:
+        """Contribution of each event in ``sequence`` to the logit of the next event ``target``.
+
+        ``target`` defaults to the most likely next event. Euclidean: the state
+        is an exact sum of per-event vectors (each event's embedding, scaled by
+        the gates of the events after it and by norm clipping), so
+        ``logit = bias + sum(contributions)`` exactly (``method="decomposition"``).
+        Other geometries: the change in the target logit at each step,
+        ``contributions[t] = logit(s[:t+1]) - logit(s[:t])``, which sums exactly
+        to ``logit - baseline`` but depends on the order of events
+        (``method="path"``).
+
+        Returns a dict with ``target``, ``logit``, ``baseline`` (the logit for
+        an empty history; the decoder bias for Euclidean), ``contributions``
+        (one per position), ``by_event`` (contributions summed per event id) and
+        ``method``.
+        """
+        self._check_is_fitted()
+        ids = self._as_ids(sequence)
+        if not ids:
+            raise ValueError("sequence must be non-empty.")
+        path = self._logit_path(ids)
+        if target is None:
+            target = int(path[-1].argmax())
+        if not 0 <= int(target) < self.num_event_types:
+            raise ValueError(f"target {target} is outside 0..{self.num_event_types - 1}.")
+        target = int(target)
+        if self.geometry == "euclidean":
+            W = self.model.linear_dec.weight.detach()
+            C = self._euclidean_contributions(ids)
+            contributions = (C @ W[target]).cpu().numpy()
+            method = "decomposition"
+        else:
+            contributions = (path[1:, target] - path[:-1, target]).cpu().numpy()
+            method = "path"
+        by_event: dict = {}
+        for i, c in zip(ids, contributions):
+            by_event[i] = by_event.get(i, 0.0) + float(c)
+        return {
+            "target": target,
+            "logit": float(path[-1, target]),
+            "baseline": float(path[0, target]),
+            "contributions": contributions,
+            "by_event": by_event,
+            "method": method,
+        }
+
+    def rank_causes(self, sequence: SequenceType, effect: int,
+                    exclude_effect: bool = True) -> List[tuple]:
+        """Rank the distinct events of a history by how much they raise ``effect``.
+
+        ``sequence`` is the history *before* the effect. Each distinct event id
+        is scored by its summed contribution to the logit of ``effect`` (see
+        :meth:`attribute`), highest first. ``exclude_effect`` drops earlier
+        occurrences of the effect itself. Returns ``[(event_id, score), ...]``.
+        """
+        scores = self.attribute(sequence, target=effect)["by_event"]
+        if exclude_effect:
+            scores.pop(int(effect), None)
+        return sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+
+    def counterfactual(self, sequence: SequenceType,
+                       remove: Union[int, Sequence[int], None] = None,
+                       replace: Optional[dict] = None,
+                       insert: Optional[Sequence[tuple]] = None) -> dict:
+        """Next-event distribution for ``sequence`` and for an edited copy of it.
+
+        Edits refer to positions in the original ``sequence``: ``remove`` drops
+        positions, ``replace`` maps positions to new event ids, and ``insert``
+        is a list of ``(position, event_id)`` placed before that position
+        (``position == len(sequence)`` appends). The edited history is
+        re-encoded, so the result is exact for every geometry.
+
+        Returns ``probs`` (factual), ``probs_counterfactual``, ``delta``
+        (counterfactual minus factual) and ``sequence_counterfactual``.
+        """
+        self._check_is_fitted()
+        ids = self._as_ids(sequence)
+        drop = set() if remove is None else ({remove} if isinstance(remove, int) else set(remove))
+        replace = {} if replace is None else dict(replace)
+        before: dict = {}
+        for pos, ev in (insert or []):
+            before.setdefault(int(pos), []).append(int(ev))
+        for pos in list(drop) + list(replace):
+            if not 0 <= int(pos) < len(ids):
+                raise ValueError(f"position {pos} is outside the sequence.")
+        for pos in before:
+            if not 0 <= pos <= len(ids):
+                raise ValueError(f"insert position {pos} is outside 0..{len(ids)}.")
+        edited: List[int] = []
+        for p in range(len(ids) + 1):
+            edited.extend(before.get(p, []))
+            if p < len(ids) and p not in drop:
+                edited.append(int(replace.get(p, ids[p])))
+        edited = self._as_ids(edited)
+        p_fact = torch.softmax(self._logit_path(ids)[-1], dim=0).cpu().numpy()
+        p_cf = torch.softmax(self._logit_path(edited)[-1], dim=0).cpu().numpy()
+        return {"probs": p_fact, "probs_counterfactual": p_cf,
+                "delta": p_cf - p_fact, "sequence_counterfactual": edited}
+
+    def event_gates(self) -> np.ndarray:
+        """Learned gate ``g_e`` of every event, shape ``(num_event_types, embedding_dim)``.
+
+        The Euclidean update with a gate is ``h_t = (1 + g_e) * h_{t-1} + e_t``,
+        so a negative coordinate means the event shrinks (forgets) that part of
+        the history and a positive one means it amplifies it. Requires
+        ``gate`` to be set.
+        """
+        self._check_is_fitted()
+        if self.geometry != "euclidean" or self.model.gate is None:
+            raise ValueError("event_gates needs geometry='euclidean' with gate='vector' or 'tied'.")
+        with torch.no_grad():
+            ids = torch.arange(self.num_event_types, device=self.device)
+            return self.model.gate_values(ids).cpu().numpy()
+
     def _standardize_sequences(
         self, sequences: Iterable[SequenceType]
     ) -> List[torch.Tensor]:
@@ -604,6 +807,8 @@ class Event2Vec:
         Reconstruction enforces invertibility of the update:
         - Euclidean: subtracting the increment recovers the previous state,
           ``(h_t - e_t) == h_{t-1}`` (exact when norm clipping does not fire).
+          With a gate the residual is ``g_e * h_{t-1}``, so the term becomes the
+          additivity penalty ``||g_e * h_{t-1}||^2`` that pulls the gate to zero.
         - Hyperbolic: the gyrogroup *left-cancellation* law recovers the
           increment exactly, ``(-h_{t-1}) ⊕_c h_t == e_t``. (The previous
           ``(h_t ⊕_c -e_t)`` form is a right-cancellation and carries a
