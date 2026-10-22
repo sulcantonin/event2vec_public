@@ -16,7 +16,7 @@
 [![PMLR](https://img.shields.io/badge/PMLR-vol.%20282-1f4e79.svg)](https://proceedings.mlr.press/v282/sulc26a.html)
 [![arXiv](https://img.shields.io/badge/arXiv-2509.12188-b31b1b.svg)](https://arxiv.org/abs/2509.12188)
 
-**[event2vec.com](https://event2vec.com)** · [Paper](https://proceedings.mlr.press/v282/sulc26a.html) · [Changelog](https://github.com/sulcantonin/event2vec_public/blob/main/CHANGELOG.md) · [Issues](https://github.com/sulcantonin/event2vec_public/issues)
+**[event2vec.com](https://event2vec.com)** · [Visual guide](https://github.com/sulcantonin/event2vec_public/blob/main/docs/visual-guide.md) · [Paper](https://proceedings.mlr.press/v282/sulc26a.html) · [Changelog](https://github.com/sulcantonin/event2vec_public/blob/main/CHANGELOG.md) · [Issues](https://github.com/sulcantonin/event2vec_public/issues)
 
 ![Event2Vector teaser](https://raw.githubusercontent.com/sulcantonin/event2vec_public/main/images/teaser.png)
 
@@ -36,6 +36,9 @@ events' vectors. This makes the representation interpretable by construction:
 Other geometries (hyperbolic, spherical, rotation, Heisenberg, affine, product)
 keep this compositional structure while capturing hierarchy, cycles or order. All
 of them sit behind one scikit-learn-style estimator.
+
+The [visual guide](https://github.com/sulcantonin/event2vec_public/blob/main/docs/visual-guide.md) walks through all of this picture by picture: histories
+as sums, prediction, exact explanations, counterfactuals, gates and geometries.
 
 ## Installation
 
@@ -314,13 +317,49 @@ Bug reports and questions are welcome in the
 
 ## FAQ
 
-**How is Event2Vec different from an RNN?** It is a recurrent model, but its update
-is restricted to a fixed operation chosen by the geometry: adding the event's vector
-in the Euclidean case, a group product in the others. An RNN learns a nonlinear
-function of the state and the input. That restriction costs expressiveness, and
-an RNN usually predicts the next event somewhat better. In exchange, the state is a
-closed-form expression of its events: histories compose, and every event's share
-of a prediction can be read off exactly.
+**How is Event2Vec different from Word2Vec?** Both learn one vector per event, but
+from different signals. Word2Vec learns from co-occurrence in a symmetric context
+window: two events are similar when they appear together. Event2Vec learns from
+next-event prediction: a history must predict the event that follows it, so each
+event's vector is pulled towards the events that follow it. This has three
+consequences:
+
+- Its vectors encode what comes next, not what appears together. On synthetic health
+  records (Synthea), the similarity of Event2Vec's vectors follows the similarity of
+  the events' successors (Spearman 0.79) far more than their co-occurrence (0.32);
+  for Word2Vec it is the reverse (0.30 and 0.46).
+- It represents whole histories and predicts their next event. Word2Vec has neither a
+  history state nor a predictive model.
+- Its explanations have a direction. Asked which earlier condition caused a
+  complication, Event2Vec's attribution ranks the true cause first in 84% of Synthea
+  cases and Word2Vec's similarity in 52%: a complication is more similar to other
+  complications than to the diabetes that causes them.
+
+Word2Vec is the right tool when co-occurrence is the question: on intrusion-detection
+alerts (AIT-ADS), where the relevant alerts are defined by occurring together, it
+ranks them perfectly.
+
+**How is Event2Vec different from an RNN?** It is a recurrent model too, but its
+transition is restricted to a fixed operation selected by the event: adding the
+event's vector in the Euclidean case, optionally after a per-event rescaling of the
+history (`gate`), or a group product in the other geometries. An RNN such as a GRU
+or LSTM learns a nonlinear function of the state and the input, with gates that
+depend on the state. Two things follow:
+
+- Event2Vec's state is a closed-form expression of its events, so histories compose
+  exactly and every prediction splits exactly into one term per event. An RNN can
+  only be explained after the fact, by methods that approximate this split. In our
+  comparison, Event2Vec's contributions add up to the logit within 1e-6, while
+  integrated gradients and gradient times input on GRU and LSTM models miss by 0.09
+  to 11. On Synthea, Event2Vec ranks the known cause first more often (0.84 against
+  at most 0.73 for the RNN explanations) at a similar next-event loss.
+- The restriction costs expressiveness. On the AIT-ADS alert streams, where order
+  matters more, a GRU predicts markedly better, and its integrated-gradients
+  explanations rank the attack precursors slightly better (0.95 against 0.92).
+
+So Event2Vec is the better choice when exact, per-event explanations matter, and an
+RNN when raw predictive accuracy on strongly order-dependent data does. The numbers
+come from one training run of each model.
 
 **Why does additivity hold?** In the Euclidean model, `h_t = h_{t-1} + e_t` by
 construction, so with no clipping the state is exactly the sum of its event vectors
@@ -347,10 +386,6 @@ The gate, or a non-Euclidean geometry, restores order sensitivity.
 an acute illness, a sentence boundary or a burst of repeated alerts might.
 `event_gates()` then shows which events forget. The plain sum is the default
 because it keeps every guarantee above.
-
-**Why not Word2Vec?** Word2Vec learns which events appear together. Event2Vec learns
-which histories predict which next event, so its vectors and explanations have a
-direction: from earlier events to later ones.
 
 ## Citation
 
