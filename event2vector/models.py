@@ -238,7 +238,7 @@ class Event2Vec:
         gate: Optional[str] = None,
         learning_rate: float = 1e-3,
         learning_rate_decay: bool = False,
-        learning_rate_decay_shape: Literal["cosine"] = "cosine",
+        learning_rate_decay_shape: Literal["cosine", "lerp"] = "cosine",
         learning_rate_decay_min_percent: float = 0.05,
         batch_size: int = 32,
         num_epochs: int = 50,
