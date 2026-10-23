@@ -3,6 +3,7 @@ import warnings
 from typing import Iterable, List, Optional, Sequence, Union
 
 import numpy as np
+from typing_extensions import Literal
 import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pad_sequence
@@ -236,6 +237,9 @@ class Event2Vec:
         lambda_consistency: float = 0.2,
         gate: Optional[str] = None,
         learning_rate: float = 1e-3,
+        learning_rate_decay: bool = False,
+        learning_rate_decay_shape: Literal["cosine", "lerp"] = "cosine",
+        learning_rate_decay_min_percent: float = 0.05,
         batch_size: int = 32,
         num_epochs: int = 50,
         pad_sequences: bool = False,
@@ -277,6 +281,9 @@ class Event2Vec:
         self.lambda_consistency = lambda_consistency
         self.gate = gate
         self.learning_rate = learning_rate
+        self.learning_rate_decay = learning_rate_decay
+        self.learning_rate_decay_shape = learning_rate_decay_shape
+        self.learning_rate_decay_min_percent = learning_rate_decay_min_percent
         self.batch_size = batch_size
         self.num_epochs = num_epochs
         self.pad_sequences = pad_sequences
@@ -414,6 +421,7 @@ class Event2Vec:
 
     def _make_optimizer(self):
         """AdamW for Euclidean; optionally RiemannianAdam (geoopt) for hyperbolic."""
+
         if self.geometry == "hyperbolic" and self.riemannian:
             try:
                 import geoopt
@@ -438,7 +446,33 @@ class Event2Vec:
             return geoopt.optim.RiemannianAdam(
                 self.model.parameters(), lr=self.learning_rate
             )
-        return torch.optim.AdamW(self.model.parameters(), lr=self.learning_rate)
+
+        opt = torch.optim.AdamW(self.model.parameters(), lr=self.learning_rate)
+
+        if self.learning_rate_decay:
+            import numpy as np
+            from torch.optim.lr_scheduler import LambdaLR
+
+            base  = opt.param_groups[0]["lr"]
+            total = max(int(getattr(self, "num_epochs", 1) or 1), 1)
+            floor = self.learning_rate_decay_min_percent
+
+            if self.lr_shape == "cosine":
+                fn = lambda s: floor + (1 - floor) * 0.5 * (1 + np.cos(np.pi * min(s / total, 1.0)))
+            else:
+                fn = lambda s: max(1.0 - (1.0 - floor) * min(s / total, 1.0), floor)
+
+            self._lr_sched = LambdaLR(opt, fn)
+            self._lr_trace = []
+
+            got = self._lr_sched.get_last_lr()[0]
+            if not np.isclose(got, base, rtol=1e-6):
+                raise RuntimeError(
+                    f"scheduler set lr={got:.3e}, expected {base:.3e} --"
+                    "lr_lambda must return a multiplier, not an absolute learning rate"
+                )
+
+        return opt
 
     def fit(
         self,
@@ -839,6 +873,8 @@ class Event2Vec:
         return prediction_loss, reconstruction_loss, consistency_loss
 
     def _train_epoch(self, sequences, optimizer, use_padding: bool) -> float:
+        if self.learning_rate_decay:
+            self._lr_trace.append(self._lr_sched.get_last_lr()[0])
         shuffled = sequences.copy()
         self._rng.shuffle(shuffled)
         total_loss = 0.0
@@ -852,6 +888,8 @@ class Event2Vec:
             if batch_loss is not None:
                 total_loss += batch_loss
                 total_batches += 1
+        if self.learning_rate_decay:
+            self._lr_sched.step()
         return total_loss / max(1, total_batches)
 
     def _train_batch_unpadded(self, batch, optimizer):
@@ -1029,4 +1067,3 @@ class Event2Vec:
         raise TypeError(
             "Inputs must be event indices, 1-D int tensors, sequences, or embedding vectors."
         )
-
